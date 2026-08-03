@@ -1,8 +1,14 @@
 {
   "name": "violet-vault",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Local desktop workspace for Obsidian handwritten-note agents",
+  "author": {
+    "name": "Onur Dursun",
+    "email": "onurdursun@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/onurdursun/HandwrittenNote2Obsidian",
+  "desktopName": "com.onurdursun.violetvault",
   "type": "module",
   "main": "electron/main.mjs",
   "engines": {
@@ -10,6 +16,7 @@
   },
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "fix:electron-sandbox": "bash scripts/fix-electron-sandbox.sh",
     "build": "tsc --noEmit && vite build",
     "start": "npm run build && electron .",
     "test": "node --test tests/*.test.mjs && npm run build",
@@ -17,7 +24,10 @@
     "dist:dir": "npm run build && electron-builder --dir"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "lucide-react": "^1.28.0",
+    "node-pty": "^1.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
@@ -38,6 +48,9 @@
     "appId": "com.onurdursun.violetvault",
     "productName": "Violet Vault",
     "asar": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",
@@ -48,8 +61,16 @@
       "output": "release"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Utility",
+      "synopsis": "Local Obsidian handwritten-note agent workspace",
+      "maintainer": "Onur Dursun <onurdursun@users.noreply.github.com>",
+      "vendor": "Onur Dursun",
+      "icon": "build/icons",
+      "syncDesktopName": true,
       "artifactName": "Violet-Vault-${version}-${arch}.${ext}"
     }
   }

@@ -12,4 +12,19 @@ contextBridge.exposeInMainWorld("violet", {
   checkCli: () => ipcRenderer.invoke("cli:status"),
   runAgent: (request) => ipcRenderer.invoke("agent:run", request),
   stopAgent: () => ipcRenderer.invoke("agent:stop"),
+  startCodexTerminal: (request, dimensions) => ipcRenderer.invoke("agent:terminal-start", { request, dimensions }),
+  sendTerminalInput: (sessionId, data) => ipcRenderer.send("agent:terminal-input", { sessionId, data }),
+  resizeTerminal: (sessionId, cols, rows) => ipcRenderer.send("agent:terminal-resize", { sessionId, cols, rows }),
+  interruptTerminal: (sessionId) => ipcRenderer.invoke("agent:terminal-interrupt", sessionId),
+  closeTerminal: (sessionId) => ipcRenderer.invoke("agent:terminal-close", sessionId),
+  onTerminalData: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("agent:terminal-data", listener);
+    return () => ipcRenderer.removeListener("agent:terminal-data", listener);
+  },
+  onTerminalExit: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("agent:terminal-exit", listener);
+    return () => ipcRenderer.removeListener("agent:terminal-exit", listener);
+  },
 });

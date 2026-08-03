@@ -1,4 +1,4 @@
-export type AgentId = "retriever" | "editor" | "author" | "supervisor";
+export type AgentId = "retriever" | "editor" | "author";
 export type ProviderId = "codex" | "claude" | "local";
 export type Effort = "low" | "medium" | "high";
 
@@ -17,6 +17,7 @@ export type Conversation = {
   model: string;
   effort: Effort;
   messages: Message[];
+  terminalTranscript?: string;
   updatedAt: number;
 };
 
@@ -54,9 +55,26 @@ export type RunRequest = {
   effort: Effort;
   vaultPath: string;
   notePath: string | null;
+  noteContent?: string | null;
   messages: Message[];
   prompt: string;
   images: Attachment[];
+};
+
+export type TerminalDimensions = {
+  cols: number;
+  rows: number;
+};
+
+export type TerminalDataEvent = {
+  sessionId: string;
+  data: string;
+};
+
+export type TerminalExitEvent = {
+  sessionId: string;
+  exitCode: number;
+  signal?: number;
 };
 
 export type VioletBridge = {
@@ -71,6 +89,13 @@ export type VioletBridge = {
   checkCli(): Promise<CliStatus>;
   runAgent(request: RunRequest): Promise<{ output: string; provider: Exclude<ProviderId, "local"> }>;
   stopAgent(): Promise<{ stopped: boolean }>;
+  startCodexTerminal(request: RunRequest, dimensions: TerminalDimensions): Promise<{ sessionId: string }>;
+  sendTerminalInput(sessionId: string, data: string): void;
+  resizeTerminal(sessionId: string, cols: number, rows: number): void;
+  interruptTerminal(sessionId: string): Promise<{ interrupted: boolean }>;
+  closeTerminal(sessionId: string): Promise<{ closed: boolean }>;
+  onTerminalData(callback: (event: TerminalDataEvent) => void): () => void;
+  onTerminalExit(callback: (event: TerminalExitEvent) => void): () => void;
 };
 
 declare global {

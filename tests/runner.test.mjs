@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildInvocation, buildTaskPrompt } from "../electron/runner.mjs";
+import { buildInteractiveInvocation, buildInvocation, buildTaskPrompt, buildUserPrompt } from "../electron/runner.mjs";
 
 const base = {
   agentId: "retriever",
@@ -14,22 +14,44 @@ const base = {
   images: ["/tmp/page-1.png"],
 };
 
-test("retriever uses an ephemeral, read-only Codex run", () => {
-  const invocation = buildInvocation(base, "Retriever contract");
+test("interactive Codex uses the native TUI with questions and approvals enabled", () => {
+  const invocation = buildInteractiveInvocation(base, "Retriever contract");
   assert.equal(invocation.binary, "codex");
-  assert.deepEqual(invocation.args.slice(0, 7), ["exec", "--ephemeral", "--skip-git-repo-check", "--cd", "/vault", "--sandbox", "read-only"]);
-  assert.ok(invocation.args.includes("--image"));
-  assert.ok(invocation.args.includes("gpt-5.6-sol"));
-  assert.match(invocation.args.at(-1), /AI\/Embeddings\.md/);
+  assert.ok(!invocation.args.includes("exec"));
+  assert.ok(!invocation.args.includes("--ephemeral"));
+  assert.equal(invocation.args[invocation.args.indexOf("--ask-for-approval") + 1], "on-request");
+  assert.equal(invocation.args[invocation.args.indexOf("--sandbox") + 1], "read-only");
+  assert.match(invocation.args.find((value) => value.startsWith("developer_instructions=")), /Retriever contract/);
+  assert.equal(invocation.args.at(-1), base.prompt);
 });
 
-test("write agents are bounded to Codex workspace-write", () => {
-  for (const agentId of ["editor", "author", "supervisor"]) {
-    const invocation = buildInvocation({ ...base, agentId }, `${agentId} contract`);
-    const sandboxIndex = invocation.args.indexOf("--sandbox");
-    assert.equal(invocation.args[sandboxIndex + 1], "workspace-write");
+test("selected note content is embedded in the Codex user prompt", () => {
+  const request = { ...base, noteContent: "# Embeddings\n\nSource-grounded note body." };
+  const invocation = buildInteractiveInvocation(request, "Retriever contract");
+  assert.equal(invocation.args.at(-1), buildUserPrompt(request));
+  assert.match(invocation.args.at(-1), /# Selected note supplied by Violet Vault/);
+  assert.match(invocation.args.at(-1), /Path: AI\/Embeddings\.md/);
+  assert.match(invocation.args.at(-1), /Source-grounded note body/);
+});
+
+test("Codex prompt stays unchanged when no note is selected", () => {
+  assert.equal(buildUserPrompt({ ...base, notePath: null }), base.prompt);
+});
+
+test("interactive Codex write agents remain bounded to workspace-write", () => {
+  for (const agentId of ["editor", "author"]) {
+    const invocation = buildInteractiveInvocation({ ...base, agentId }, `${agentId} contract`);
+    assert.equal(invocation.args[invocation.args.indexOf("--sandbox") + 1], "workspace-write");
     assert.ok(!invocation.args.includes("danger-full-access"));
   }
+});
+
+test("non-interactive Codex invocation is rejected", () => {
+  assert.throws(() => buildInvocation(base, "contract"), /interactive terminal/);
+});
+
+test("removed Supervisor role is rejected", () => {
+  assert.throws(() => buildInteractiveInvocation({ ...base, agentId: "supervisor" }, "contract"), /Unknown agent/);
 });
 
 test("Claude retriever uses plan mode and staged image access", () => {

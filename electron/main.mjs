@@ -1,19 +1,24 @@
-import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, session } from "electron";
 import { spawn } from "node:child_process";
-import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildInvocation } from "./runner.mjs";
+import * as pty from "node-pty";
+import { loadAgentInstructions } from "./instructions.mjs";
+import { buildInteractiveInvocation, buildInvocation } from "./runner.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(currentDirectory, "..");
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic"]);
 const activeRuns = new Map();
+const terminalSessions = new Map();
 const MAX_NOTES = 10_000;
 const MAX_NOTE_PREVIEW_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
+const MAX_TERMINAL_TRANSCRIPT_CHARS = 8 * 1024 * 1024;
 
 const defaultState = {
   conversations: [],
@@ -30,11 +35,19 @@ function statePath() {
 
 function cleanState(value) {
   if (!value || typeof value !== "object") return defaultState;
-  const conversations = Array.isArray(value.conversations) ? value.conversations.slice(0, 500) : [];
+  const conversations = Array.isArray(value.conversations)
+    ? value.conversations.slice(0, 500).filter((conversation) => conversation && typeof conversation === "object").map((conversation) => ({
+      ...conversation,
+      agent: ["retriever", "editor", "author"].includes(conversation.agent) ? conversation.agent : "retriever",
+      terminalTranscript: typeof conversation.terminalTranscript === "string"
+        ? conversation.terminalTranscript.slice(0, MAX_TERMINAL_TRANSCRIPT_CHARS)
+        : undefined,
+    }))
+    : [];
   return {
     conversations,
     vaultPath: typeof value.vaultPath === "string" ? value.vaultPath : null,
-    agentId: ["retriever", "editor", "author", "supervisor"].includes(value.agentId) ? value.agentId : "retriever",
+    agentId: ["retriever", "editor", "author"].includes(value.agentId) ? value.agentId : "retriever",
     provider: ["codex", "claude", "local"].includes(value.provider) ? value.provider : "codex",
     model: typeof value.model === "string" ? value.model : "gpt-5.6-sol",
     effort: ["low", "medium", "high"].includes(value.effort) ? value.effort : "high",
@@ -102,6 +115,15 @@ async function readVaultNote(vaultPath, notePath) {
   return { content: await readFile(target, "utf8") };
 }
 
+async function attachSelectedNote(request, vault) {
+  if (!request.notePath) return { ...request, noteContent: null };
+  if (!vault.notes.some((note) => note.path === request.notePath)) {
+    throw new Error("The selected note is no longer available in this vault.");
+  }
+  const { content } = await readVaultNote(request.vaultPath, request.notePath);
+  return { ...request, noteContent: content };
+}
+
 function mimeFromExtension(filePath) {
   const extension = path.extname(filePath).toLowerCase();
   if ([".jpg", ".jpeg"].includes(extension)) return "image/jpeg";
@@ -128,17 +150,27 @@ async function stageImages(images) {
   if (!Array.isArray(images) || images.length === 0) return { paths: [], directories: [] };
   const targetDirectory = await mkdtemp(path.join(os.tmpdir(), "violet-vault-"));
   const staged = [];
-  for (const [index, image] of images.slice(0, 12).entries()) {
-    if (!image || typeof image.path !== "string") continue;
-    const extension = path.extname(image.path).toLowerCase();
-    if (!IMAGE_EXTENSIONS.has(extension)) continue;
-    const metadata = await stat(image.path);
-    if (!metadata.isFile() || metadata.size > MAX_IMAGE_BYTES) throw new Error(`${path.basename(image.path)} exceeds the 40 MB image limit.`);
-    const destination = path.join(targetDirectory, `${String(index + 1).padStart(2, "0")}-${path.basename(image.path).replace(/[^a-zA-Z0-9._-]/g, "_")}`);
-    await copyFile(image.path, destination, fsConstants.COPYFILE_EXCL);
-    staged.push(destination);
+  try {
+    for (const [index, image] of images.slice(0, 12).entries()) {
+      if (!image || typeof image.path !== "string") continue;
+      const extension = path.extname(image.path).toLowerCase();
+      if (!IMAGE_EXTENSIONS.has(extension)) continue;
+      const metadata = await stat(image.path);
+      if (!metadata.isFile() || metadata.size > MAX_IMAGE_BYTES) throw new Error(`${path.basename(image.path)} exceeds the 40 MB image limit.`);
+      const destination = path.join(targetDirectory, `${String(index + 1).padStart(2, "0")}-${path.basename(image.path).replace(/[^a-zA-Z0-9._-]/g, "_")}`);
+      await copyFile(image.path, destination, fsConstants.COPYFILE_EXCL);
+      staged.push(destination);
+    }
+    if (staged.length === 0) await rm(targetDirectory, { recursive: true, force: true });
+    return { paths: staged, directories: staged.length ? [targetDirectory] : [] };
+  } catch (error) {
+    await rm(targetDirectory, { recursive: true, force: true });
+    throw error;
   }
-  return { paths: staged, directories: staged.length ? [targetDirectory] : [] };
+}
+
+async function cleanupStagedImages(directories) {
+  await Promise.all((directories ?? []).map((directory) => rm(directory, { recursive: true, force: true })));
 }
 
 function executableCandidates(name) {
@@ -190,13 +222,6 @@ async function cliStatus() {
   };
 }
 
-async function agentInstructions(agentId) {
-  if (!["retriever", "editor", "author", "supervisor"].includes(agentId)) throw new Error("Unknown agent selection.");
-  const shared = await readFile(path.join(projectRoot, "agents", "shared", "AGENTS.md"), "utf8");
-  const specialist = await readFile(path.join(projectRoot, "agents", agentId, "AGENTS.md"), "utf8");
-  return `${shared}\n\n${specialist.replace(/^.*Read and follow.*$/m, "")}`;
-}
-
 function runChild(binary, args, cwd, senderId) {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
@@ -232,18 +257,69 @@ function runChild(binary, args, cwd, senderId) {
 async function executeAgent(request, senderId) {
   if (!request || typeof request.vaultPath !== "string") throw new Error("Select an Obsidian vault first.");
   const vault = await scanVault(request.vaultPath);
-  if (request.notePath && !vault.notes.some((note) => note.path === request.notePath)) throw new Error("The selected note is no longer available in this vault.");
-  const instructions = await agentInstructions(request.agentId);
+  const requestWithNote = await attachSelectedNote(request, vault);
+  const instructions = await loadAgentInstructions(projectRoot, request.agentId);
   const staged = await stageImages(request.images);
-  const invocation = buildInvocation({
-    ...request,
-    images: staged.paths,
-    imageDirectories: staged.directories,
-  }, instructions);
-  const binary = await findExecutable(invocation.binary);
-  if (!binary) throw new Error(`${invocation.binary === "codex" ? "Codex" : "Claude"} CLI was not found. Install it and restart Violet Vault.`);
-  const output = await runChild(binary, invocation.args, request.vaultPath, senderId);
-  return { output, provider: request.provider };
+  try {
+    const invocation = buildInvocation({
+      ...requestWithNote,
+      images: staged.paths,
+      imageDirectories: staged.directories,
+    }, instructions);
+    const binary = await findExecutable(invocation.binary);
+    if (!binary) throw new Error(`${invocation.binary === "codex" ? "Codex" : "Claude"} CLI was not found. Install it and restart Violet Vault.`);
+    const output = await runChild(binary, invocation.args, request.vaultPath, senderId);
+    return { output, provider: request.provider };
+  } finally {
+    await cleanupStagedImages(staged.directories);
+  }
+}
+
+function terminalSize(value, fallback, minimum, maximum) {
+  return Number.isInteger(value) ? Math.min(maximum, Math.max(minimum, value)) : fallback;
+}
+
+async function startTerminalSession(request, sender, dimensions = {}) {
+  if (!request || request.provider !== "codex" || typeof request.vaultPath !== "string") {
+    throw new Error("Select an Obsidian vault and Codex before starting a terminal session.");
+  }
+  if (terminalSessions.has(sender.id)) throw new Error("A Codex terminal session is already running.");
+
+  const vault = await scanVault(request.vaultPath);
+  const requestWithNote = await attachSelectedNote(request, vault);
+
+  const instructions = await loadAgentInstructions(projectRoot, request.agentId);
+  const staged = await stageImages(request.images);
+  try {
+    const invocation = buildInteractiveInvocation({ ...requestWithNote, images: staged.paths }, instructions);
+    const binary = await findExecutable(invocation.binary);
+    if (!binary) throw new Error("Codex CLI was not found. Install it and restart Violet Vault.");
+
+    const sessionId = randomUUID();
+    const terminal = pty.spawn(binary, invocation.args, {
+      name: "xterm-256color",
+      cols: terminalSize(dimensions.cols, 100, 20, 400),
+      rows: terminalSize(dimensions.rows, 30, 5, 200),
+      cwd: request.vaultPath,
+      env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" },
+    });
+    const session = { id: sessionId, terminal, stagedDirectories: staged.directories, vaultPath: request.vaultPath };
+    terminalSessions.set(sender.id, session);
+
+    terminal.onData((data) => {
+      if (!sender.isDestroyed()) sender.send("agent:terminal-data", { sessionId, data });
+    });
+    terminal.onExit(({ exitCode, signal }) => {
+      if (terminalSessions.get(sender.id)?.id === sessionId) terminalSessions.delete(sender.id);
+      if (!sender.isDestroyed()) sender.send("agent:terminal-exit", { sessionId, exitCode, signal });
+      void cleanupStagedImages(staged.directories);
+    });
+
+    return { sessionId };
+  } catch (error) {
+    await cleanupStagedImages(staged.directories);
+    throw error;
+  }
 }
 
 function registerHandlers() {
@@ -269,6 +345,32 @@ function registerHandlers() {
   });
   ipcMain.handle("cli:status", () => cliStatus());
   ipcMain.handle("agent:run", (event, request) => executeAgent(request, event.sender.id));
+  ipcMain.handle("agent:terminal-start", (event, value) => startTerminalSession(value?.request, event.sender, value?.dimensions));
+  ipcMain.on("agent:terminal-input", (event, value) => {
+    const session = terminalSessions.get(event.sender.id);
+    if (!session || session.id !== value?.sessionId || typeof value?.data !== "string" || value.data.length > 65_536) return;
+    session.terminal.write(value.data);
+  });
+  ipcMain.on("agent:terminal-resize", (event, value) => {
+    const session = terminalSessions.get(event.sender.id);
+    if (!session || session.id !== value?.sessionId) return;
+    session.terminal.resize(
+      terminalSize(value?.cols, 100, 20, 400),
+      terminalSize(value?.rows, 30, 5, 200),
+    );
+  });
+  ipcMain.handle("agent:terminal-interrupt", (event, sessionId) => {
+    const session = terminalSessions.get(event.sender.id);
+    if (!session || session.id !== sessionId) return { interrupted: false };
+    session.terminal.write("\u0003");
+    return { interrupted: true };
+  });
+  ipcMain.handle("agent:terminal-close", (event, sessionId) => {
+    const session = terminalSessions.get(event.sender.id);
+    if (!session || session.id !== sessionId) return { closed: false };
+    session.terminal.kill("SIGTERM");
+    return { closed: true };
+  });
   ipcMain.handle("agent:stop", (event) => {
     const child = activeRuns.get(event.sender.id);
     if (!child) return { stopped: false };
@@ -285,6 +387,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 640,
     backgroundColor: "#08070b",
+    autoHideMenuBar: true,
     show: false,
     title: "Violet Vault",
     webPreferences: {
@@ -296,6 +399,7 @@ function createWindow() {
     },
   });
 
+  window.setMenuBarVisibility(false);
   window.once("ready-to-show", () => window.show());
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -303,6 +407,8 @@ function createWindow() {
   window.on("closed", () => {
     const child = activeRuns.get(senderId);
     if (child) child.kill("SIGTERM");
+    const session = terminalSessions.get(senderId);
+    if (session) session.terminal.kill("SIGTERM");
   });
 
   const developmentUrl = process.env.VITE_DEV_SERVER_URL;
@@ -311,6 +417,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   registerHandlers();
   createWindow();
@@ -319,5 +426,6 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   for (const child of activeRuns.values()) child.kill("SIGTERM");
+  for (const session of terminalSessions.values()) session.terminal.kill("SIGTERM");
   if (process.platform !== "darwin") app.quit();
 });
