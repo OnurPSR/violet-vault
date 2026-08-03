@@ -98,11 +98,11 @@ For a new note, record the selected source-image paths in the note's properties 
 
 ### Diagram-file conventions
 
-- Store Excalidraw files in the vault's existing Excalidraw directory, normally `Diagrams/Excalidraw/{NoteName}.excalidraw` and `Diagrams/Excalidraw/{NoteName}.svg`.
+- Store Excalidraw files in the vault's existing Excalidraw directory, normally `Diagrams/Excalidraw/{NoteName}/Markdown/` and `Diagrams/Excalidraw/{NoteName}/SVG`.
 - Use descriptive kebab-case names: `<note-slug>-<concept>`.
-- Before creating a drawing, inspect existing Excalidraw files and plugin configuration to determine whether this vault uses `.excalidraw`, `.excalidraw.md`, SVG auto-export, or another established convention.
 - Reuse the validated convention exactly.
 - Mermaid diagrams remain inline in the Markdown note unless the vault has a clear contrary convention.
+- Use excalidraw files as in the notes as svg format inline, do not directly embed excalidraw.md. 
 
 ## Visual style: Layered Spatial Fidelity
 
@@ -300,7 +300,7 @@ Use Mermaid when edge logic is primary and exact free-form placement is not.
 
 Use Excalidraw when spatial meaning is primary.
 
-- Create SVG of each diagram and save it to the Diagrams/{NoteName}/SVG. And use those SVG images in the markdown file inline. Do not use excalidraw.md or md format inline.
+- Create SVG of each diagram and use them inline.
 - Match the vault's light/dark background and existing drawing style.
 - Use a restrained palette:
   - neutral gray for structure;
@@ -316,7 +316,6 @@ Use Excalidraw when spatial meaning is primary.
 - Use actual LaTeX formula elements for mathematical labels when supported; do not imitate mathematics with plain Unicode text when fidelity would suffer.
 - Add internal links only when the referenced vault note actually exists.
 - Embed the drawing using the vault's validated syntax and an appropriate width.
-- Prefer SVG auto-export when the vault already uses it or when portability is required; do not change global plugin settings without permission.
 
 If the plugin or a valid creation pattern is unavailable, do not insert a fake embed. Explain the blocker and request the missing configuration.
 
@@ -337,7 +336,7 @@ For a large matrix or tensor:
    $$
 
 6. Preserve any highlighted row, column, slice, or lookup operation.
-7. Keep labels such as “vocabulary size,” “context size,” “embedding dimension,” and “logits” attached to the correct side of the figure.
+7. Keep labels attached to the correct side of the figure.
 
 Do not fabricate matrix values that the handwriting does not provide.
 
@@ -359,9 +358,8 @@ For every equation:
 3. Preserve approximation versus equality: never replace `\approx` with `=`.
 4. Check balanced delimiters, braces, environments, subscripts, and superscripts.
 5. Check dimensions and operator placement.
-6. Recompute explicit arithmetic shown in the notes with a calculator or code.
-7. If arithmetic is inconsistent, preserve the source value and add a clearly labeled technical-check note.
-8. Avoid unsupported custom macros and packages.
+6. Do not check arithmetic shown in the notes with a calculator or code.
+7. Avoid unsupported custom macros and packages.
 
 Do not place display-math delimiters inside code fences. Do not rely on LaTeX inside Mermaid if Obsidian does not render it reliably.
 
@@ -468,7 +466,7 @@ First check whether the official `obsidian` CLI is available and connected to a 
 6. Repeat for important Excalidraw files when necessary.
 7. Fix the note and repeat until the validation checklist passes.
 
-If the CLI is unavailable but another real Obsidian UI-control method exists, use it.
+If the CLI is unavailable try to access it.
 
 A generic Markdown preview is not sufficient for final visual verification because Obsidian, MathJax, Mermaid, the active theme, and Excalidraw must be tested together.
 

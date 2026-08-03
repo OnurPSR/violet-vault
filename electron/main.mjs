@@ -115,13 +115,12 @@ async function readVaultNote(vaultPath, notePath) {
   return { content: await readFile(target, "utf8") };
 }
 
-async function attachSelectedNote(request, vault) {
-  if (!request.notePath) return { ...request, noteContent: null };
+function validateSelectedNote(request, vault) {
+  if (!request.notePath) return request;
   if (!vault.notes.some((note) => note.path === request.notePath)) {
     throw new Error("The selected note is no longer available in this vault.");
   }
-  const { content } = await readVaultNote(request.vaultPath, request.notePath);
-  return { ...request, noteContent: content };
+  return request;
 }
 
 function mimeFromExtension(filePath) {
@@ -257,7 +256,7 @@ function runChild(binary, args, cwd, senderId) {
 async function executeAgent(request, senderId) {
   if (!request || typeof request.vaultPath !== "string") throw new Error("Select an Obsidian vault first.");
   const vault = await scanVault(request.vaultPath);
-  const requestWithNote = await attachSelectedNote(request, vault);
+  const requestWithNote = validateSelectedNote(request, vault);
   const instructions = await loadAgentInstructions(projectRoot, request.agentId);
   const staged = await stageImages(request.images);
   try {
@@ -286,7 +285,7 @@ async function startTerminalSession(request, sender, dimensions = {}) {
   if (terminalSessions.has(sender.id)) throw new Error("A Codex terminal session is already running.");
 
   const vault = await scanVault(request.vaultPath);
-  const requestWithNote = await attachSelectedNote(request, vault);
+  const requestWithNote = validateSelectedNote(request, vault);
 
   const instructions = await loadAgentInstructions(projectRoot, request.agentId);
   const staged = await stageImages(request.images);

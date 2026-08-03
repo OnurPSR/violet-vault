@@ -22,16 +22,17 @@ test("interactive Codex uses the native TUI with questions and approvals enabled
   assert.equal(invocation.args[invocation.args.indexOf("--ask-for-approval") + 1], "on-request");
   assert.equal(invocation.args[invocation.args.indexOf("--sandbox") + 1], "read-only");
   assert.match(invocation.args.find((value) => value.startsWith("developer_instructions=")), /Retriever contract/);
-  assert.equal(invocation.args.at(-1), base.prompt);
+  assert.equal(invocation.args.at(-1), buildUserPrompt(base));
 });
 
-test("selected note content is embedded in the Codex user prompt", () => {
+test("only the selected note path is appended to the Codex user prompt", () => {
   const request = { ...base, noteContent: "# Embeddings\n\nSource-grounded note body." };
   const invocation = buildInteractiveInvocation(request, "Retriever contract");
   assert.equal(invocation.args.at(-1), buildUserPrompt(request));
-  assert.match(invocation.args.at(-1), /# Selected note supplied by Violet Vault/);
+  assert.match(invocation.args.at(-1), /# Selected note path supplied by Violet Vault/);
   assert.match(invocation.args.at(-1), /Path: AI\/Embeddings\.md/);
-  assert.match(invocation.args.at(-1), /Source-grounded note body/);
+  assert.doesNotMatch(invocation.args.at(-1), /Source-grounded note body/);
+  assert.match(invocation.args.at(-1), /Open this vault-relative file/);
 });
 
 test("Codex prompt stays unchanged when no note is selected", () => {

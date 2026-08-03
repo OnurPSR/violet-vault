@@ -55,7 +55,6 @@ export type RunRequest = {
   effort: Effort;
   vaultPath: string;
   notePath: string | null;
-  noteContent?: string | null;
   messages: Message[];
   prompt: string;
   images: Attachment[];

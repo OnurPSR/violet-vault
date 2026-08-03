@@ -3,6 +3,7 @@ import {
   Bot,
   BrainCircuit,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleStop,
   Clock3,
@@ -12,14 +13,11 @@ import {
   Image as ImageIcon,
   Library,
   Menu,
-  MoreHorizontal,
   Paperclip,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
   Send,
-  Settings2,
   Sparkles,
   SquarePen,
   X,
@@ -31,6 +29,7 @@ import type { AgentId, AppState, Attachment, CliStatus, Conversation, Effort, Me
 
 type ModelOption = { label: string; value: string };
 type Provider = { label: string; models: ModelOption[] };
+type FolderEntry = { name: string; path: string; noteCount: number };
 
 const AGENTS = [
   { id: "retriever" as AgentId, name: "Note Retriever", mode: "Read only", text: "Find concepts, answer questions and surface related notes or figures.", icon: Search, color: "#8b7cff" },
@@ -91,6 +90,9 @@ export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [note, setNote] = useState<Note | null>(null);
   const [query, setQuery] = useState("");
+  const [folderPath, setFolderPath] = useState("");
+  const [folderHistory, setFolderHistory] = useState<string[]>([""]);
+  const [folderHistoryIndex, setFolderHistoryIndex] = useState(0);
   const [running, setRunning] = useState(false);
   const [terminalRequest, setTerminalRequest] = useState<RunRequest | null>(null);
   const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
@@ -98,9 +100,6 @@ export default function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [vaultMenuOpen, setVaultMenuOpen] = useState(false);
-  const [cliRefreshing, setCliRefreshing] = useState(false);
   const [ready, setReady] = useState(false);
   const [cliStatus, setCliStatus] = useState<CliStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -111,10 +110,38 @@ export default function App() {
   const terminalSaveTimer = useRef<number | null>(null);
   const agent = AGENTS.find((item) => item.id === agentId) ?? AGENTS[0];
   const AgentIcon = agent.icon;
-  const filtered = useMemo(
+  const searchResults = useMemo(
     () => notes.filter((item) => item.path.toLowerCase().includes(query.toLowerCase())).slice(0, 500),
     [notes, query],
   );
+  const folderView = useMemo(() => {
+    const prefix = folderPath ? `${folderPath}/` : "";
+    const folders = new Map<string, FolderEntry>();
+    const directNotes: Note[] = [];
+
+    for (const item of notes) {
+      if (!item.path.startsWith(prefix)) continue;
+      const remainder = item.path.slice(prefix.length);
+      const separator = remainder.indexOf("/");
+      if (separator === -1) {
+        directNotes.push(item);
+        continue;
+      }
+      const name = remainder.slice(0, separator);
+      const path = prefix ? `${folderPath}/${name}` : name;
+      const existing = folders.get(path);
+      folders.set(path, { name, path, noteCount: (existing?.noteCount ?? 0) + 1 });
+    }
+
+    return {
+      folders: [...folders.values()].sort((a, b) => a.name.localeCompare(b.name)),
+      notes: directNotes.sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }, [folderPath, notes]);
+  const folderCrumbs = useMemo(() => {
+    const segments = folderPath.split("/").filter(Boolean);
+    return segments.map((name, index) => ({ name, path: segments.slice(0, index + 1).join("/") }));
+  }, [folderPath]);
 
   useEffect(() => {
     let cancelled = false;
@@ -241,8 +268,6 @@ export default function App() {
     setError(null);
     setAgentId(nextAgent);
     setMenu(false);
-    setSettingsOpen(false);
-    setVaultMenuOpen(false);
   }
 
   function openChat(chat: Conversation) {
@@ -263,6 +288,33 @@ export default function App() {
     setProvider(next);
     setModel(PROVIDERS[next].models[0].value);
     setError(null);
+  }
+
+  function resetFolderNavigation() {
+    setFolderPath("");
+    setFolderHistory([""]);
+    setFolderHistoryIndex(0);
+    setQuery("");
+  }
+
+  function navigateFolder(nextPath: string) {
+    if (nextPath === folderPath) {
+      setQuery("");
+      return;
+    }
+    const nextHistory = [...folderHistory.slice(0, folderHistoryIndex + 1), nextPath];
+    setFolderHistory(nextHistory);
+    setFolderHistoryIndex(nextHistory.length - 1);
+    setFolderPath(nextPath);
+    setQuery("");
+  }
+
+  function moveFolderHistory(offset: -1 | 1) {
+    const nextIndex = folderHistoryIndex + offset;
+    if (nextIndex < 0 || nextIndex >= folderHistory.length) return;
+    setFolderHistoryIndex(nextIndex);
+    setFolderPath(folderHistory[nextIndex]);
+    setQuery("");
   }
 
   async function send() {
@@ -408,8 +460,6 @@ export default function App() {
 
   async function selectVault() {
     setError(null);
-    setSettingsOpen(false);
-    setVaultMenuOpen(false);
     try {
       const selected = await window.violet.chooseVault();
       if (!selected) return;
@@ -417,6 +467,7 @@ export default function App() {
       setVaultName(selected.vaultName);
       setNotes(selected.notes);
       setNote(null);
+      resetFolderNavigation();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to open this vault.");
     }
@@ -430,37 +481,6 @@ export default function App() {
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to read the selected note.");
-    }
-  }
-
-  async function refreshCliStatus() {
-    setCliRefreshing(true);
-    setError(null);
-    try {
-      setCliStatus(await window.violet.checkCli());
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to refresh CLI status.");
-    } finally {
-      setCliRefreshing(false);
-    }
-  }
-
-  async function refreshVault() {
-    if (!vaultPath) return;
-    setError(null);
-    setVaultMenuOpen(false);
-    try {
-      const refreshed = await window.violet.restoreVault(vaultPath);
-      if (!refreshed) throw new Error("The selected vault is no longer available.");
-      setVaultName(refreshed.vaultName);
-      setNotes(refreshed.notes);
-      if (note) {
-        const selected = refreshed.notes.find((item) => item.path === note.path);
-        if (selected) await openNote(selected);
-        else setNote(null);
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to refresh the vault.");
     }
   }
 
@@ -503,21 +523,9 @@ export default function App() {
             {chats.slice(0, 12).map((chat) => <button key={chat.id} className={chatId === chat.id ? "active" : ""} onClick={() => openChat(chat)}><span>{chat.title}</span><small>{age(chat.updatedAt)}</small></button>)}
           </div>
         </section>
-        {settingsOpen && (
-          <div className="settings-popover" role="dialog" aria-label="Local workspace settings">
-            <div className="popover-heading"><div><span className="micro-label">SETTINGS</span><strong>Local connections</strong></div><button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Close settings"><X size={15} /></button></div>
-            <div className="connection-list">
-              <div><span className={`status-dot ${cliStatus?.codex.installed ? "connected" : ""}`} /><span><strong>Codex CLI</strong><small>{cliStatus?.codex.version ?? "Not found"}</small></span></div>
-              <div><span className={`status-dot ${cliStatus?.claude.installed ? "connected" : ""}`} /><span><strong>Claude CLI</strong><small>{cliStatus?.claude.version ?? "Not found"}</small></span></div>
-            </div>
-            <button className="popover-action" disabled={cliRefreshing} onClick={() => void refreshCliStatus()}><RefreshCw size={14} className={cliRefreshing ? "spin" : ""} />{cliRefreshing ? "Checking…" : "Refresh CLI status"}</button>
-            <button className="popover-action" disabled={sessionLocked} onClick={() => void selectVault()}><FolderOpen size={14} />Change vault</button>
-          </div>
-        )}
         <div className="sidebar-footer">
           <span className={`status-dot ${running ? "running" : activeCli?.installed ? "connected" : ""}`} />
           <div><strong>{running ? "Agent running" : "Local bridge"}</strong><small>{running ? `${agent.name} · ${PROVIDERS[provider].label}` : bridgeText}</small></div>
-          <button className={`icon-button ${settingsOpen ? "active" : ""}`} onClick={() => setSettingsOpen((open) => !open)} title="Settings" aria-label="Open settings" aria-expanded={settingsOpen}><Settings2 size={16} /></button>
         </div>
       </aside>
 
@@ -599,14 +607,26 @@ export default function App() {
       </section>
 
       <aside className="context-panel">
-        <div className="context-heading"><div><span className="micro-label">CONTEXT</span><h2>Obsidian Vault</h2></div><div className="vault-actions"><button className={`icon-button ${vaultMenuOpen ? "active" : ""}`} title="Vault actions" aria-label="Open vault actions" aria-expanded={vaultMenuOpen} onClick={() => setVaultMenuOpen((open) => !open)}><MoreHorizontal size={17} /></button>{vaultMenuOpen && <div className="vault-menu"><button disabled={!vaultPath || sessionLocked} onClick={() => void refreshVault()}><RefreshCw size={14} />Refresh notes</button><button disabled={sessionLocked} onClick={() => void selectVault()}><FolderOpen size={14} />Change vault</button><button disabled={!note || sessionLocked} onClick={() => { setNote(null); setVaultMenuOpen(false); }}><X size={14} />Clear selected note</button></div>}</div></div>
+        <div className="context-heading"><div><span className="micro-label">CONTEXT</span><h2>Obsidian Vault</h2></div></div>
         <button className="vault-picker" disabled={sessionLocked} onClick={() => void selectVault()}><span className="vault-icon"><Library size={19} /></span><span><small>ACTIVE VAULT</small><strong>{vaultName}</strong></span><FolderOpen size={17} /></button>
         <div className="note-search"><Search size={15} /><input ref={searchInput} disabled={sessionLocked} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" /><span>Ctrl K</span></div>
+        <nav className="folder-navigation" aria-label="Folder navigation">
+          <div className="folder-history-controls">
+            <button disabled={folderHistoryIndex === 0 || sessionLocked} onClick={() => moveFolderHistory(-1)} title="Previous folder" aria-label="Previous folder"><ChevronLeft size={15} /></button>
+            <button disabled={folderHistoryIndex >= folderHistory.length - 1 || sessionLocked} onClick={() => moveFolderHistory(1)} title="Next folder" aria-label="Next folder"><ChevronRight size={15} /></button>
+          </div>
+          <div className="folder-breadcrumb" aria-label="Current folder">
+            <button className={folderPath === "" ? "active" : ""} disabled={sessionLocked} onClick={() => navigateFolder("")}><Library size={12} />Root</button>
+            {folderCrumbs.map((crumb) => <span key={crumb.path}><ChevronRight size={11} /><button className={crumb.path === folderPath ? "active" : ""} disabled={sessionLocked} onClick={() => navigateFolder(crumb.path)}>{crumb.name}</button></span>)}
+          </div>
+        </nav>
         <div className="file-browser">
           {notes.length === 0 ? (
             <div className="vault-empty"><Folder size={30} /><strong>Choose your vault</strong><p>Open a local folder to browse Markdown notes and pass one as agent context.</p><button onClick={() => void selectVault()}>Select folder</button></div>
+          ) : query.trim() ? (
+            <><div className="browser-summary"><span>{searchResults.length} of {notes.length} notes</span><span>Search results</span></div><div className="note-list">{searchResults.map((item) => <button key={item.path} disabled={sessionLocked} className={note?.path === item.path ? "active" : ""} onClick={() => void openNote(item)}><FileText size={15} /><span><strong>{item.name}</strong><small>{item.path.split("/").slice(0, -1).join(" / ") || "Vault root"}</small></span></button>)}</div>{searchResults.length === 0 && <div className="folder-empty"><Search size={24} /><strong>No matching notes</strong><p>Try another name or path.</p></div>}</>
           ) : (
-            <><div className="browser-summary"><span>{filtered.length}{filtered.length < notes.length ? ` of ${notes.length}` : ""} notes</span><span>Markdown</span></div><div className="note-list">{filtered.map((item) => <button key={item.path} disabled={sessionLocked} className={note?.path === item.path ? "active" : ""} onClick={() => void openNote(item)}><FileText size={15} /><span><strong>{item.name}</strong><small>{item.path.split("/").slice(0, -1).join(" / ") || "Vault root"}</small></span></button>)}</div></>
+            <><div className="browser-summary"><span>{folderView.folders.length} folders</span><span>{folderView.notes.length} notes</span></div><div className="note-list">{folderView.folders.map((folder) => <button key={folder.path} className="folder-row" disabled={sessionLocked} onClick={() => navigateFolder(folder.path)}><Folder size={16} /><span><strong>{folder.name}</strong><small>{folder.noteCount} {folder.noteCount === 1 ? "note" : "notes"}</small></span><ChevronRight size={14} /></button>)}{folderView.notes.map((item) => <button key={item.path} disabled={sessionLocked} className={note?.path === item.path ? "active" : ""} onClick={() => void openNote(item)}><FileText size={15} /><span><strong>{item.name}</strong><small>Markdown note</small></span></button>)}</div>{folderView.folders.length === 0 && folderView.notes.length === 0 && <div className="folder-empty"><Folder size={24} /><strong>Empty folder</strong><p>No Markdown notes are available here.</p></div>}</>
           )}
         </div>
         <div className="selected-context">
