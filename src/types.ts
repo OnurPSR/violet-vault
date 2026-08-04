@@ -34,6 +34,12 @@ export type Attachment = {
   type: string;
 };
 
+export type EditContext = {
+  selectedText: string | null;
+  figurePath: string | null;
+  figureAlt: string | null;
+};
+
 export type CliStatus = {
   codex: { installed: boolean; version: string | null };
   claude: { installed: boolean; version: string | null };
@@ -58,6 +64,7 @@ export type RunRequest = {
   messages: Message[];
   prompt: string;
   images: Attachment[];
+  editContext?: EditContext;
 };
 
 export type TerminalDimensions = {
@@ -76,6 +83,12 @@ export type TerminalExitEvent = {
   signal?: number;
 };
 
+export type AgentStreamEvent = {
+  itemId: string;
+  delta?: string;
+  content?: string;
+};
+
 export type VioletBridge = {
   appInfo(): Promise<{ version: string; platform: string }>;
   getState(): Promise<AppState>;
@@ -83,11 +96,13 @@ export type VioletBridge = {
   chooseVault(): Promise<{ vaultPath: string; vaultName: string; notes: Note[] } | null>;
   restoreVault(vaultPath: string): Promise<{ vaultPath: string; vaultName: string; notes: Note[] } | null>;
   readNote(vaultPath: string, notePath: string): Promise<{ content: string }>;
+  readVaultAsset(vaultPath: string, assetPath: string): Promise<{ dataUrl: string }>;
   chooseImages(): Promise<Attachment[]>;
   pathForFile(file: File): string;
   checkCli(): Promise<CliStatus>;
   runAgent(request: RunRequest): Promise<{ output: string; provider: Exclude<ProviderId, "local"> }>;
   stopAgent(): Promise<{ stopped: boolean }>;
+  onAgentStream(callback: (event: AgentStreamEvent) => void): () => void;
   startCodexTerminal(request: RunRequest, dimensions: TerminalDimensions): Promise<{ sessionId: string }>;
   sendTerminalInput(sessionId: string, data: string): void;
   resizeTerminal(sessionId: string, cols: number, rows: number): void;

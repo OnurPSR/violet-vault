@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session } from "electron";
 import { spawn } from "node:child_process";
 import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
@@ -7,12 +7,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as pty from "node-pty";
+import { sanitizeVaultSvg } from "./assets.mjs";
 import { loadAgentInstructions } from "./instructions.mjs";
 import { buildInteractiveInvocation, buildInvocation } from "./runner.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(currentDirectory, "..");
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic"]);
+const VAULT_FIGURE_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ".svg"]);
 const activeRuns = new Map();
 const terminalSessions = new Map();
 const MAX_NOTES = 10_000;
@@ -113,6 +115,51 @@ async function readVaultNote(vaultPath, notePath) {
   if (!metadata.isFile()) throw new Error("The selected note is not a file.");
   if (metadata.size > MAX_NOTE_PREVIEW_BYTES) return { content: "This note is larger than the 2 MB preview limit." };
   return { content: await readFile(target, "utf8") };
+}
+
+async function readVaultAsset(vaultPath, assetPath) {
+  if (typeof vaultPath !== "string" || typeof assetPath !== "string" || !assetPath.trim()) {
+    throw new Error("Invalid figure path.");
+  }
+  const cleanPath = assetPath.split(/[?#]/, 1)[0].replace(/^\.\//, "");
+  let target = path.resolve(vaultPath, cleanPath);
+  if (!relativeIsSafe(vaultPath, target)) throw new Error("The figure is outside the selected vault.");
+  try {
+    await access(target, fsConstants.R_OK);
+  } catch (error) {
+    if (cleanPath.includes("/") || cleanPath.includes("\\")) throw error;
+    const matches = [];
+    const queue = [vaultPath];
+    while (queue.length && matches.length < 2) {
+      const directory = queue.pop();
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+        const absolute = path.join(directory, entry.name);
+        if (entry.isDirectory()) queue.push(absolute);
+        else if (entry.isFile() && entry.name.toLowerCase() === cleanPath.toLowerCase()) matches.push(absolute);
+      }
+    }
+    if (matches.length !== 1) throw new Error(matches.length ? "The figure name is ambiguous in this vault." : "The figure was not found in this vault.");
+    target = matches[0];
+  }
+  const extension = path.extname(target).toLowerCase();
+  if (!VAULT_FIGURE_EXTENSIONS.has(extension)) throw new Error("The requested vault asset is not a supported image.");
+  const metadata = await stat(target);
+  if (!metadata.isFile() || metadata.size > MAX_IMAGE_BYTES) throw new Error("The figure is unavailable or exceeds the 40 MB limit.");
+  const buffer = await readFile(target);
+  if (extension === ".svg") {
+    const sanitized = sanitizeVaultSvg(buffer.toString("utf8"));
+    return { dataUrl: `data:image/svg+xml;base64,${Buffer.from(sanitized).toString("base64")}` };
+  }
+  const decoded = nativeImage.createFromBuffer(buffer);
+  const size = decoded.getSize();
+  const width = size.width || 1200;
+  const height = size.height || 800;
+  const raster = decoded.isEmpty() ? buffer : decoded.toPNG();
+  const mime = decoded.isEmpty() ? mimeFromExtension(target) : "image/png";
+  const embedded = `data:${mime};base64,${raster.toString("base64")}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image width="${width}" height="${height}" href="${embedded}" preserveAspectRatio="xMidYMid meet"/></svg>`;
+  return { dataUrl: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}` };
 }
 
 function validateSelectedNote(request, vault) {
@@ -253,7 +300,116 @@ function runChild(binary, args, cwd, senderId) {
   });
 }
 
-async function executeAgent(request, senderId) {
+function runCodexAppServer(binary, invocation, cwd, sender) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, invocation.args, {
+      cwd,
+      env: process.env,
+      shell: false,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    activeRuns.set(sender.id, child);
+    let stdoutBuffer = "";
+    let stderr = "";
+    let activeItemId = null;
+    let finalText = "";
+    let settled = false;
+
+    const finish = (error, output = "") => {
+      if (settled) return;
+      settled = true;
+      activeRuns.delete(sender.id);
+      if (!child.killed) child.kill("SIGTERM");
+      if (error) reject(error);
+      else resolve(output);
+    };
+    const write = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
+    const stream = (event) => {
+      if (!sender.isDestroyed()) sender.send("agent:stream", event);
+    };
+
+    const handleMessage = (message) => {
+      if (message.id === 1) {
+        if (message.error) return finish(new Error(message.error.message || "Unable to initialize Codex streaming."));
+        write({ method: "initialized" });
+        write({ method: "thread/start", id: 2, params: invocation.threadStart });
+        return;
+      }
+      if (message.id === 2) {
+        if (message.error) return finish(new Error(message.error.message || "Unable to start the Codex thread."));
+        const threadId = message.result?.thread?.id;
+        if (!threadId) return finish(new Error("Codex did not return a thread identifier."));
+        write({ method: "turn/start", id: 3, params: { threadId, ...invocation.turnStart } });
+        return;
+      }
+      if (message.id === 3 && message.error) {
+        finish(new Error(message.error.message || "Unable to start the Codex turn."));
+        return;
+      }
+      if (message.method === "item/agentMessage/delta") {
+        const itemId = message.params?.itemId;
+        const delta = message.params?.delta;
+        if (typeof itemId !== "string" || typeof delta !== "string") return;
+        if (activeItemId !== itemId) {
+          activeItemId = itemId;
+          finalText = delta;
+        } else {
+          finalText += delta;
+        }
+        stream({ itemId, delta });
+        return;
+      }
+      if (message.method === "item/completed" && message.params?.item?.type === "agentMessage") {
+        const itemId = message.params.item.id;
+        const content = message.params.item.text;
+        if (typeof itemId === "string" && typeof content === "string") {
+          activeItemId = itemId;
+          finalText = content;
+          stream({ itemId, content });
+        }
+        return;
+      }
+      if (message.method === "turn/completed") {
+        const turn = message.params?.turn;
+        if (turn?.status === "failed") return finish(new Error(turn.error?.message || "The Codex turn failed."));
+        const completedText = [...(turn?.items ?? [])].reverse().find((item) => item?.type === "agentMessage")?.text;
+        const output = typeof completedText === "string" ? completedText : finalText;
+        if (!output.trim()) return finish(new Error("Codex completed without an assistant response."));
+        finish(null, output);
+        return;
+      }
+      if (message.method === "error") finish(new Error(message.params?.error?.message || message.params?.message || "Codex streaming failed."));
+    };
+
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString();
+      if (stdoutBuffer.length > 8 * 1024 * 1024) return finish(new Error("Codex streaming output exceeded the 8 MB limit."));
+      const lines = stdoutBuffer.split("\n");
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try { handleMessage(JSON.parse(line)); } catch { /* Ignore non-protocol stdout noise. */ }
+      }
+    });
+    child.stderr.on("data", (chunk) => { if (stderr.length < 64_000) stderr += chunk.toString(); });
+    child.on("error", (error) => finish(new Error(`Unable to start Codex streaming: ${error.message}`)));
+    child.on("close", (code, signal) => {
+      activeRuns.delete(sender.id);
+      if (settled) return;
+      if (signal === "SIGTERM" || signal === "SIGKILL") return finish(new Error("The run was stopped."));
+      finish(new Error((stderr || `Codex app-server exited with code ${code}.`).trim().slice(-4_000)));
+    });
+
+    write({
+      method: "initialize",
+      id: 1,
+      params: { clientInfo: { name: "violet_vault", title: "Violet Vault", version: app.getVersion() } },
+    });
+  });
+}
+
+async function executeAgent(request, sender) {
   if (!request || typeof request.vaultPath !== "string") throw new Error("Select an Obsidian vault first.");
   const vault = await scanVault(request.vaultPath);
   const requestWithNote = validateSelectedNote(request, vault);
@@ -267,7 +423,9 @@ async function executeAgent(request, senderId) {
     }, instructions);
     const binary = await findExecutable(invocation.binary);
     if (!binary) throw new Error(`${invocation.binary === "codex" ? "Codex" : "Claude"} CLI was not found. Install it and restart Violet Vault.`);
-    const output = await runChild(binary, invocation.args, request.vaultPath, senderId);
+    const output = request.provider === "codex"
+      ? await runCodexAppServer(binary, invocation, request.vaultPath, sender)
+      : await runChild(binary, invocation.args, request.vaultPath, sender.id);
     return { output, provider: request.provider };
   } finally {
     await cleanupStagedImages(staged.directories);
@@ -334,6 +492,7 @@ function registerHandlers() {
     try { return await scanVault(vaultPath); } catch { return null; }
   });
   ipcMain.handle("vault:read-note", (_, value) => readVaultNote(value?.vaultPath, value?.notePath));
+  ipcMain.handle("vault:read-asset", (_, value) => readVaultAsset(value?.vaultPath, value?.assetPath));
   ipcMain.handle("images:choose", async () => {
     const result = await dialog.showOpenDialog({
       title: "Attach handwritten pages",
@@ -343,7 +502,7 @@ function registerHandlers() {
     return result.canceled ? [] : describeImages(result.filePaths);
   });
   ipcMain.handle("cli:status", () => cliStatus());
-  ipcMain.handle("agent:run", (event, request) => executeAgent(request, event.sender.id));
+  ipcMain.handle("agent:run", (event, request) => executeAgent(request, event.sender));
   ipcMain.handle("agent:terminal-start", (event, value) => startTerminalSession(value?.request, event.sender, value?.dimensions));
   ipcMain.on("agent:terminal-input", (event, value) => {
     const session = terminalSessions.get(event.sender.id);

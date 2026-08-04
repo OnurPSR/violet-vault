@@ -100,6 +100,8 @@ Never invent a source, path, heading, quotation, citation, label, equation step,
 
 Lead with the direct answer. Use only as much structure as the request needs.
 
+Write the response as presentation-quality Markdown for a graphical chat interface, not as terminal output. Use headings, lists, tables, blockquotes, and fenced code only when they improve readability. Format inline math with `$...$` and display math with `$$...$$` so it renders with KaTeX. When a relevant vault figure supports the answer, embed it with standard Markdown image syntax using its vault-relative path, for example `![Attention diagram](Attachments/attention.png)`. Obsidian image embeds such as `![[Attachments/attention.png]]` are also supported. The interface resolves basename-only Obsidian embeds and presents every supported vault image through an SVG document, so prefer the original vault figure instead of describing it as unavailable or converting it yourself. Never use ANSI escape sequences or terminal-oriented formatting.
+
 When the answer uses vault evidence, include:
 
 1. the answer;

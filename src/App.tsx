@@ -11,6 +11,7 @@ import {
   Folder,
   FolderOpen,
   Image as ImageIcon,
+  Eye,
   Library,
   Menu,
   Paperclip,
@@ -20,16 +21,19 @@ import {
   Send,
   Sparkles,
   SquarePen,
+  Trash2,
   X,
 } from "lucide-react";
 import { CSSProperties, DragEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import CodexTerminal from "./CodexTerminal";
 import CodexTranscript from "./CodexTranscript";
+import RichMessage from "./RichMessage";
 import type { AgentId, AppState, Attachment, CliStatus, Conversation, Effort, Message, Note, ProviderId, RunRequest } from "./types";
 
 type ModelOption = { label: string; value: string };
 type Provider = { label: string; models: ModelOption[] };
 type FolderEntry = { name: string; path: string; noteCount: number };
+type SelectedFigure = { path: string; alt: string; dataUrl: string };
 
 const AGENTS = [
   { id: "retriever" as AgentId, name: "Note Retriever", mode: "Read only", text: "Find concepts, answer questions and surface related notes or figures.", icon: Search, color: "#8b7cff" },
@@ -89,6 +93,10 @@ export default function App() {
   const [vaultName, setVaultName] = useState("No vault selected");
   const [notes, setNotes] = useState<Note[]>([]);
   const [note, setNote] = useState<Note | null>(null);
+  const [noteInChat, setNoteInChat] = useState(false);
+  const [selectedText, setSelectedText] = useState("");
+  const [selectedFigure, setSelectedFigure] = useState<SelectedFigure | null>(null);
+  const [noteRevision, setNoteRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [folderPath, setFolderPath] = useState("");
   const [folderHistory, setFolderHistory] = useState<string[]>([""]);
@@ -105,6 +113,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
   const terminalTranscript = useRef("");
   const terminalChatId = useRef<string | null>(null);
   const terminalSaveTimer = useRef<number | null>(null);
@@ -187,8 +196,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    scrollArea.current?.scrollTo({ top: scrollArea.current.scrollHeight, behavior: "smooth" });
+    if (!stickToBottom.current) return;
+    scrollArea.current?.scrollTo({ top: scrollArea.current.scrollHeight, behavior: "auto" });
   }, [messages, running]);
+
+  useEffect(() => {
+    const area = scrollArea.current;
+    const content = area?.firstElementChild;
+    if (!area || !content) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottom.current) area.scrollTo({ top: area.scrollHeight, behavior: "auto" });
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [chatId, messages.length === 0, terminalRequest, terminalReplay]);
 
   useEffect(() => {
     function shortcut(event: globalThis.KeyboardEvent) {
@@ -247,6 +268,18 @@ export default function App() {
     }
   }
 
+  async function refreshVaultContent() {
+    if (!vaultPath) return;
+    const refreshed = await window.violet.restoreVault(vaultPath);
+    if (!refreshed) return;
+    setNotes(refreshed.notes);
+    if (note && refreshed.notes.some((item) => item.path === note.path)) {
+      const result = await window.violet.readNote(vaultPath, note.path);
+      setNote((current) => current?.path === note.path ? { ...current, content: result.content } : current);
+      setNoteRevision((revision) => revision + 1);
+    }
+  }
+
   async function fresh(nextAgent = agentId) {
     if (terminalRequest) {
       persistTerminalTranscript(true);
@@ -264,6 +297,9 @@ export default function App() {
     terminalChatId.current = null;
     setPrompt("");
     setImages([]);
+    setNoteInChat(false);
+    setSelectedText("");
+    setSelectedFigure(null);
     setEditing(null);
     setError(null);
     setAgentId(nextAgent);
@@ -282,6 +318,12 @@ export default function App() {
     setEditing(null);
     setError(null);
     setMenu(false);
+  }
+
+  async function deleteChat(chat: Conversation) {
+    if (!window.confirm(`Delete “${chat.title}”? This cannot be undone.`)) return;
+    if (chat.id === chatId) await fresh();
+    setChats((all) => all.filter((item) => item.id !== chat.id));
   }
 
   function chooseProvider(next: ProviderId) {
@@ -320,6 +362,7 @@ export default function App() {
   async function send() {
     const text = prompt.trim();
     if (!text || running) return;
+    stickToBottom.current = true;
     if (editing) {
       const next = messages.map((message) => message.id === editing ? { ...message, content: text } : message);
       setMessages(next);
@@ -332,7 +375,13 @@ export default function App() {
     if (provider === "local") return setError("Local LLM support is display-only for now.");
     if (!cliStatus?.[provider].installed) return setError(`${PROVIDERS[provider].label} is not installed or is not available on PATH.`);
 
-    if (provider === "codex") {
+    const editContext = agentId === "editor" ? {
+      selectedText: selectedText || null,
+      figurePath: selectedFigure?.path ?? null,
+      figureAlt: selectedFigure?.alt ?? null,
+    } : undefined;
+
+    if (provider === "codex" && agentId !== "retriever") {
       const runChatId = chatId ?? uid();
       const userMessage: Message = { id: uid(), role: "user", content: text, createdAt: Date.now() };
       const staged = [...messages, userMessage];
@@ -351,10 +400,13 @@ export default function App() {
         messages,
         prompt: text,
         images,
+        editContext,
       });
       setTerminalSessionId(null);
       setPrompt("");
       setImages([]);
+      setSelectedText("");
+      setSelectedFigure(null);
       setRunning(true);
       setError(null);
       return;
@@ -362,7 +414,8 @@ export default function App() {
 
     const runChatId = chatId ?? uid();
     const userMessage: Message = { id: uid(), role: "user", content: text, createdAt: Date.now() };
-    const staged = [...messages, userMessage];
+    const assistantMessage: Message = { id: uid(), role: "assistant", content: "", createdAt: Date.now() };
+    const staged = [...messages, userMessage, assistantMessage];
     const priorMessages = messages;
     const currentImages = images;
     setMessages(staged);
@@ -370,6 +423,21 @@ export default function App() {
     setPrompt("");
     setRunning(true);
     setError(null);
+
+    let activeStreamItem: string | null = null;
+    const removeStream = window.violet.onAgentStream((event) => {
+      setMessages((current) => current.map((message) => {
+        if (message.id !== assistantMessage.id) return message;
+        if (event.content !== undefined) {
+          activeStreamItem = event.itemId;
+          return { ...message, content: event.content };
+        }
+        if (event.delta === undefined) return message;
+        const content = activeStreamItem === event.itemId ? `${message.content}${event.delta}` : event.delta;
+        activeStreamItem = event.itemId;
+        return { ...message, content };
+      }));
+    });
 
     try {
       const result = await window.violet.runAgent({
@@ -382,19 +450,22 @@ export default function App() {
         messages: priorMessages,
         prompt: text,
         images: currentImages,
+        editContext,
       });
-      const assistantMessage: Message = { id: uid(), role: "assistant", content: result.output, createdAt: Date.now() };
-      const completed = [...staged, assistantMessage];
+      const completed = staged.map((message) => message.id === assistantMessage.id ? { ...message, content: result.output } : message);
       setMessages(completed);
       upsertConversation(completed, staged.find((message) => message.role === "user")?.content ?? text, runChatId);
       setImages([]);
-      if (vaultPath) {
-        const refreshed = await window.violet.restoreVault(vaultPath);
-        if (refreshed) setNotes(refreshed.notes);
-      }
+      setSelectedText("");
+      setSelectedFigure(null);
+      await refreshVaultContent();
     } catch (cause) {
+      const failed = staged.filter((message) => message.id !== assistantMessage.id);
+      setMessages(failed);
+      upsertConversation(failed, failed.find((message) => message.role === "user")?.content ?? text, runChatId);
       setError(cause instanceof Error ? cause.message : "The agent run failed.");
     } finally {
+      removeStream();
       setRunning(false);
     }
   }
@@ -407,11 +478,7 @@ export default function App() {
   function terminalExited() {
     persistTerminalTranscript(true);
     setRunning(false);
-    if (vaultPath) {
-      void window.violet.restoreVault(vaultPath).then((refreshed) => {
-        if (refreshed) setNotes(refreshed.notes);
-      });
-    }
+    void refreshVaultContent().catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to refresh the edited note."));
   }
 
   function terminalFailed(cause: Error) {
@@ -467,6 +534,9 @@ export default function App() {
       setVaultName(selected.vaultName);
       setNotes(selected.notes);
       setNote(null);
+      setNoteInChat(false);
+      setSelectedText("");
+      setSelectedFigure(null);
       resetFolderNavigation();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to open this vault.");
@@ -478,6 +548,9 @@ export default function App() {
     try {
       const result = await window.violet.readNote(vaultPath, selected.path);
       setNote({ ...selected, content: result.content });
+      setNoteInChat(false);
+      setSelectedText("");
+      setSelectedFigure(null);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to read the selected note.");
@@ -520,7 +593,16 @@ export default function App() {
           <div className="section-label"><span>CHAT HISTORY</span><Clock3 size={14} /></div>
           <div className="recent-list">
             {chats.length === 0 && <p className="history-empty">New conversations will stay on this computer.</p>}
-            {chats.slice(0, 12).map((chat) => <button key={chat.id} className={chatId === chat.id ? "active" : ""} onClick={() => openChat(chat)}><span>{chat.title}</span><small>{age(chat.updatedAt)}</small></button>)}
+            {chats.slice(0, 12).map((chat) => (
+              <div key={chat.id} className={`recent-chat ${chatId === chat.id ? "active" : ""}`}>
+                <button className="recent-chat-open" onClick={() => openChat(chat)}>
+                  <span>{chat.title}</span><small>{age(chat.updatedAt)}</small>
+                </button>
+                <button className="recent-chat-delete" aria-label={`Delete ${chat.title}`} title="Delete conversation" onClick={() => void deleteChat(chat)}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         </section>
         <div className="sidebar-footer">
@@ -551,7 +633,14 @@ export default function App() {
           </div>
         </header>
 
-        <div className={`chat-scroll ${terminalRequest || terminalReplay ? "terminal-mode" : ""}`} ref={scrollArea}>
+        <div
+          className={`chat-scroll ${terminalRequest || terminalReplay ? "terminal-mode" : ""}`}
+          ref={scrollArea}
+          onScroll={(event) => {
+            const area = event.currentTarget;
+            stickToBottom.current = area.scrollHeight - area.scrollTop - area.clientHeight < 120;
+          }}
+        >
           {terminalRequest ? (
             <div className="terminal-workspace">
               {error && <div className="error-banner terminal-error"><span>{error}</span><button onClick={() => setError(null)}><X size={13} /></button></div>}
@@ -566,7 +655,7 @@ export default function App() {
             </div>
           ) : terminalReplay ? (
             <div className="terminal-workspace"><CodexTranscript transcript={terminalReplay} /></div>
-          ) : messages.length === 0 ? (
+          ) : messages.length === 0 && !noteInChat ? (
             <div className="empty-state">
               <div className="empty-orb"><Sparkles size={24} /></div>
               <p className="micro-label">{agent.mode}</p>
@@ -576,10 +665,30 @@ export default function App() {
             </div>
           ) : (
             <div className="message-list">
+              {noteInChat && note && (
+                <article className="note-in-chat">
+                  <header>
+                    <div><FileText size={16} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>
+                    <button onClick={() => setNoteInChat(false)} title="Close note view" aria-label="Close note view"><X size={15} /></button>
+                  </header>
+                  <div className="note-rendered">
+                    <RichMessage
+                      content={note.content ?? ""}
+                      vaultPath={vaultPath}
+                      selectable={agentId === "editor"}
+                      selectedFigure={selectedFigure?.path}
+                      assetRevision={noteRevision}
+                      onTextSelect={agentId === "editor" ? setSelectedText : undefined}
+                      onFigureSelect={agentId === "editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined}
+                    />
+                  </div>
+                  {agentId === "editor" && <footer>Select text or click a figure to scope the next edit.</footer>}
+                </article>
+              )}
               {messages.map((message) => (
                 <article key={message.id} className={`message ${message.role}`}>
                   <div className="message-avatar">{message.role === "user" ? "O" : <Sparkles size={15} />}</div>
-                  <div className="message-content"><div className="message-meta"><strong>{message.role === "user" ? "You" : agent.name}</strong><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div><p>{message.content}</p></div>
+                  <div className="message-content"><div className="message-meta"><strong>{message.role === "user" ? "You" : agent.name}</strong><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>{message.role === "assistant" ? <RichMessage content={message.content} vaultPath={vaultPath} selectedFigure={selectedFigure?.path} onFigureSelect={agentId === "editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined} /> : <p>{message.content}</p>}</div>
                   {message.role === "user" && <button className="message-edit" disabled={running} onClick={() => { setEditing(message.id); setPrompt(message.content); }} title="Edit question"><Pencil size={14} /></button>}
                 </article>
               ))}
@@ -593,11 +702,21 @@ export default function App() {
             {error && <div className="error-banner"><span>{error}</span><button onClick={() => setError(null)}><X size={13} /></button></div>}
             <div className={`composer ${dragging ? "dragging" : ""} ${editing ? "editing" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={drop}>
               {editing && <div className="editing-banner"><Pencil size={13} />Editing stored question<button onClick={() => { setEditing(null); setPrompt(""); }}><X size={13} /></button></div>}
+              {agentId === "editor" && note && (
+                <div className="edit-target-tray">
+                  <div className="edit-target-heading"><Pencil size={13} /><strong>Edit target</strong><span>{selectedText || selectedFigure ? "Scoped selection" : "Whole note"}</span></div>
+                  <div className="edit-target-items">
+                    <span className="edit-target-note"><FileText size={14} /><span><strong>{note.name}</strong><small>Selected note</small></span></span>
+                    {selectedText && <span className="edit-target-text"><span>“{selectedText.replace(/\s+/g, " ").slice(0, 100)}{selectedText.length > 100 ? "…" : ""}”</span><button onClick={() => setSelectedText("")} aria-label="Remove selected text"><X size={12} /></button></span>}
+                    {selectedFigure && <span className="edit-target-figure"><img src={selectedFigure.dataUrl} alt="" /><span><strong>{selectedFigure.alt}</strong><small>Selected figure</small></span><button onClick={() => setSelectedFigure(null)} aria-label="Remove selected figure"><X size={12} /></button></span>}
+                  </div>
+                </div>
+              )}
               {images.length > 0 && <div className="attachment-row">{images.map((image, index) => <div className="attachment-chip" key={image.path}><span><ImageIcon size={15} /></span><div><strong>{image.name}</strong><small>{Math.ceil(image.size / 1024)} KB</small></div><button onClick={() => setImages((all) => all.filter((_, itemIndex) => itemIndex !== index))}><X size={13} /></button></div>)}</div>}
               {dragging && <div className="drop-overlay"><ImageIcon size={24} /><strong>Drop handwritten pages here</strong></div>}
               <textarea value={prompt} disabled={running} onChange={(event) => setPrompt(event.target.value)} onKeyDown={key} placeholder={`Message ${agent.name}…`} rows={3} />
               <div className="composer-tools">
-                <div><button className="composer-button" onClick={() => void attachImages()} disabled={running} title="Attach images"><Paperclip size={17} /></button>{note && <span className="context-pill"><FileText size={13} />{note.name}<button onClick={() => setNote(null)}><X size={12} /></button></span>}</div>
+                <div><button className="composer-button" onClick={() => void attachImages()} disabled={running} title="Attach images"><Paperclip size={17} /></button>{note && <span className="context-pill"><FileText size={13} />{note.name}<button onClick={() => { setNote(null); setNoteInChat(false); setSelectedText(""); setSelectedFigure(null); }}><X size={12} /></button></span>}</div>
                 <div className="send-area"><span>↵ Send · ⇧↵ New line</span>{running ? <button className="send-button stop" onClick={() => void stop()} title="Stop agent"><CircleStop size={17} /></button> : <button className="send-button" onClick={() => void send()} disabled={editing ? !prompt.trim() : !canSend} title={canSend || editing ? "Send" : "Select a vault and install the selected CLI"}><Send size={17} /></button>}</div>
               </div>
             </div>
@@ -631,7 +750,7 @@ export default function App() {
         </div>
         <div className="selected-context">
           <div className="section-label"><span>SELECTED NOTE</span><ChevronDown size={14} /></div>
-          {note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div><p>{note.content?.slice(0, 220).replace(/[#*`>-]/g, " ") || "Note selected as model context."}</p></div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}
+          {note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div><p>{note.content?.slice(0, 220).replace(/[#*`>-]/g, " ") || "Note selected as model context."}</p>{agentId === "editor" && <button className="view-note-button" onClick={() => setNoteInChat(true)}><Eye size={14} />{noteInChat ? "Note open in chat" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}
         </div>
       </aside>
     </main>
