@@ -34,3 +34,7 @@ yarn-error.log*
 /.npm-cache/
 /.sites-runtime/
 /.vinext/
+
+# python caches
+__pycache__/
+*.py[cod]
