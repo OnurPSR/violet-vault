@@ -2,12 +2,15 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { Clock3, Command } from "lucide-react";
 import { useEffect, useRef } from "react";
+import TokenUsageSummary from "./TokenUsageSummary";
+import type { TokenUsage } from "./types";
 
 type Props = {
   transcript: string;
+  tokenUsage?: TokenUsage | null;
 };
 
-export default function CodexTranscript({ transcript }: Props) {
+export default function CodexTranscript({ transcript, tokenUsage }: Props) {
   const host = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,7 +80,7 @@ export default function CodexTranscript({ transcript }: Props) {
       <div className="terminal-stage"><div className="terminal-host" ref={host} /></div>
       <footer className="terminal-footer transcript-footer">
         <span>Read-only terminal transcript</span>
-        <span>Choose New conversation to start another Codex session</span>
+        <TokenUsageSummary usage={tokenUsage} unavailable terminal />
       </footer>
     </section>
   );

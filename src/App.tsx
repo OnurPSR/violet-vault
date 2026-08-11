@@ -1,5 +1,4 @@
 import {
-  BookOpen,
   Bot,
   BrainCircuit,
   ChevronDown,
@@ -28,7 +27,9 @@ import { CSSProperties, DragEvent, KeyboardEvent, useEffect, useMemo, useRef, us
 import CodexTerminal from "./CodexTerminal";
 import CodexTranscript from "./CodexTranscript";
 import RichMessage from "./RichMessage";
-import type { AgentId, AppState, Attachment, CliStatus, Conversation, Effort, Message, Note, ProviderId, RunRequest } from "./types";
+import TokenUsageSummary from "./TokenUsageSummary";
+import type { AgentId, AppState, Attachment, CliStatus, Conversation, Effort, Message, Note, ProviderId, RunRequest, TerminalExitEvent, TokenUsage } from "./types";
+import { buildEditContext } from "./edit-context";
 
 type ModelOption = { label: string; value: string };
 type Provider = { label: string; models: ModelOption[] };
@@ -37,8 +38,7 @@ type SelectedFigure = { path: string; alt: string; dataUrl: string };
 
 const AGENTS = [
   { id: "retriever" as AgentId, name: "Note Retriever", mode: "Read only", text: "Find concepts, answer questions and surface related notes or figures.", icon: Search, color: "#8b7cff" },
-  { id: "editor" as AgentId, name: "Scoped Editor", mode: "Patch mode", text: "Refine selected content while preserving unrelated vault material.", icon: SquarePen, color: "#b06cff" },
-  { id: "author" as AgentId, name: "Note Author", mode: "Create + append", text: "Create notes, append source-grounded sections and revise additions.", icon: BookOpen, color: "#6d9cff" },
+  { id: "author-editor" as AgentId, name: "Note Author–Editor", mode: "Author + edit", text: "Append, reconstruct, insert, or make scoped edits in a selected vault note.", icon: SquarePen, color: "#b06cff" },
 ];
 
 const PROVIDERS: Record<ProviderId, Provider> = {
@@ -64,8 +64,7 @@ const PROVIDERS: Record<ProviderId, Provider> = {
 
 const SUGGESTIONS: Record<AgentId, string[]> = {
   retriever: ["Find my explanation of embedding space", "Which note contains this figure?", "Connect attention to matrix multiplication"],
-  editor: ["Clarify this derivation without changing its structure", "Fix the selected note’s broken embeds", "Improve the explanation of this equation"],
-  author: ["Append these pages to the selected note", "Create a note from these handwritten images", "Revise only the section added in this conversation"],
+  "author-editor": ["Append these pages to the selected note", "Clarify the selected derivation", "Insert an explanation after the selected section"],
 };
 
 const MAX_TERMINAL_TRANSCRIPT_CHARS = 8 * 1024 * 1024;
@@ -105,6 +104,7 @@ export default function App() {
   const [terminalRequest, setTerminalRequest] = useState<RunRequest | null>(null);
   const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
   const [terminalReplay, setTerminalReplay] = useState<string | null>(null);
+  const [terminalTokenUsage, setTerminalTokenUsage] = useState<TokenUsage | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -227,7 +227,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", shortcut);
   });
 
-  function upsertConversation(next: Message[], title: string, id: string, extra: Partial<Pick<Conversation, "terminalTranscript">> = {}) {
+  function upsertConversation(next: Message[], title: string, id: string, extra: Partial<Pick<Conversation, "terminalTranscript" | "terminalTokenUsage">> = {}) {
     setChatId(id);
     setChats((all) => {
       const previous = all.find((chat) => chat.id === id);
@@ -247,7 +247,7 @@ export default function App() {
     });
   }
 
-  function persistTerminalTranscript(markUpdated = false) {
+  function persistTerminalTranscript(markUpdated = false, usage = terminalTokenUsage) {
     if (terminalSaveTimer.current !== null) {
       window.clearTimeout(terminalSaveTimer.current);
       terminalSaveTimer.current = null;
@@ -256,7 +256,7 @@ export default function App() {
     if (!id) return;
     const transcript = terminalTranscript.current;
     setChats((all) => all.map((chat) => chat.id === id
-      ? { ...chat, terminalTranscript: transcript, updatedAt: markUpdated ? Date.now() : chat.updatedAt }
+      ? { ...chat, terminalTranscript: transcript, terminalTokenUsage: usage, updatedAt: markUpdated ? Date.now() : chat.updatedAt }
       : chat));
   }
 
@@ -293,6 +293,7 @@ export default function App() {
     setChatId(null);
     setMessages([]);
     setTerminalReplay(null);
+    setTerminalTokenUsage(null);
     terminalTranscript.current = "";
     terminalChatId.current = null;
     setPrompt("");
@@ -315,6 +316,7 @@ export default function App() {
     setEffort(chat.effort);
     setMessages(chat.messages);
     setTerminalReplay(chat.provider === "codex" && chat.terminalTranscript ? chat.terminalTranscript : null);
+    setTerminalTokenUsage(chat.terminalTokenUsage ?? null);
     setEditing(null);
     setError(null);
     setMenu(false);
@@ -361,7 +363,8 @@ export default function App() {
 
   async function send() {
     const text = prompt.trim();
-    if (!text || running) return;
+    const promptlessReconstruction = agentId === "author-editor" && images.length > 0 && Boolean(note);
+    if ((!text && !promptlessReconstruction) || running) return;
     stickToBottom.current = true;
     if (editing) {
       const next = messages.map((message) => message.id === editing ? { ...message, content: text } : message);
@@ -374,22 +377,24 @@ export default function App() {
     if (!vaultPath) return setError("Select an Obsidian vault before running an agent.");
     if (provider === "local") return setError("Local LLM support is display-only for now.");
     if (!cliStatus?.[provider].installed) return setError(`${PROVIDERS[provider].label} is not installed or is not available on PATH.`);
+    if (agentId === "author-editor" && images.length > 0 && !note) {
+      return setError("Select the target note before sending handwritten pages.");
+    }
 
-    const editContext = agentId === "editor" ? {
-      selectedText: selectedText || null,
-      figurePath: selectedFigure?.path ?? null,
-      figureAlt: selectedFigure?.alt ?? null,
-    } : undefined;
+    const editContext = agentId === "author-editor"
+      ? buildEditContext(note?.content, selectedText, selectedFigure)
+      : undefined;
 
     if (provider === "codex" && agentId !== "retriever") {
       const runChatId = chatId ?? uid();
-      const userMessage: Message = { id: uid(), role: "user", content: text, createdAt: Date.now() };
+      const userMessage: Message = { id: uid(), role: "user", content: text || "Reconstruct attached handwritten pages", createdAt: Date.now() };
       const staged = [...messages, userMessage];
       terminalChatId.current = runChatId;
       terminalTranscript.current = "";
+      setTerminalTokenUsage(null);
       setTerminalReplay(null);
       setMessages(staged);
-      upsertConversation(staged, messages.find((message) => message.role === "user")?.content ?? text, runChatId, { terminalTranscript: "" });
+      upsertConversation(staged, messages.find((message) => message.role === "user")?.content ?? text, runChatId, { terminalTranscript: "", terminalTokenUsage: null });
       setTerminalRequest({
         agentId,
         provider,
@@ -413,7 +418,7 @@ export default function App() {
     }
 
     const runChatId = chatId ?? uid();
-    const userMessage: Message = { id: uid(), role: "user", content: text, createdAt: Date.now() };
+    const userMessage: Message = { id: uid(), role: "user", content: text || "Reconstruct attached handwritten pages", createdAt: Date.now() };
     const assistantMessage: Message = { id: uid(), role: "assistant", content: "", createdAt: Date.now() };
     const staged = [...messages, userMessage, assistantMessage];
     const priorMessages = messages;
@@ -452,7 +457,9 @@ export default function App() {
         images: currentImages,
         editContext,
       });
-      const completed = staged.map((message) => message.id === assistantMessage.id ? { ...message, content: result.output } : message);
+      const completed = staged.map((message) => message.id === assistantMessage.id
+        ? { ...message, content: result.output, tokenUsage: result.tokenUsage ?? null }
+        : message);
       setMessages(completed);
       upsertConversation(completed, staged.find((message) => message.role === "user")?.content ?? text, runChatId);
       setImages([]);
@@ -475,8 +482,10 @@ export default function App() {
     setRunning(false);
   }
 
-  function terminalExited() {
-    persistTerminalTranscript(true);
+  function terminalExited(event: TerminalExitEvent) {
+    const usage = event.tokenUsage ?? null;
+    setTerminalTokenUsage(usage);
+    persistTerminalTranscript(true, usage);
     setRunning(false);
     void refreshVaultContent().catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to refresh the edited note."));
   }
@@ -563,7 +572,12 @@ export default function App() {
     : activeCli?.installed
       ? activeCli.version ?? `${PROVIDERS[provider].label} ready`
       : `${PROVIDERS[provider].label} not found`;
-  const canSend = Boolean(prompt.trim() && vaultPath && provider !== "local" && activeCli?.installed);
+  const canSend = Boolean(
+    (prompt.trim() || (agentId === "author-editor" && images.length > 0 && note))
+    && vaultPath
+    && provider !== "local"
+    && activeCli?.installed,
+  );
   const sessionLocked = running || Boolean(terminalRequest) || Boolean(terminalReplay);
 
   return (
@@ -648,13 +662,14 @@ export default function App() {
                 request={terminalRequest}
                 onStarted={(id) => { setTerminalSessionId(id); setRunning(true); }}
                 onData={captureTerminalData}
-                onExit={() => terminalExited()}
+                onExit={terminalExited}
                 onError={terminalFailed}
                 onClose={closeTerminalView}
+                tokenUsage={terminalTokenUsage}
               />
             </div>
           ) : terminalReplay ? (
-            <div className="terminal-workspace"><CodexTranscript transcript={terminalReplay} /></div>
+            <div className="terminal-workspace"><CodexTranscript transcript={terminalReplay} tokenUsage={terminalTokenUsage} /></div>
           ) : messages.length === 0 && !noteInChat ? (
             <div className="empty-state">
               <div className="empty-orb"><Sparkles size={24} /></div>
@@ -675,20 +690,25 @@ export default function App() {
                     <RichMessage
                       content={note.content ?? ""}
                       vaultPath={vaultPath}
-                      selectable={agentId === "editor"}
+                      selectable={agentId === "author-editor"}
                       selectedFigure={selectedFigure?.path}
                       assetRevision={noteRevision}
-                      onTextSelect={agentId === "editor" ? setSelectedText : undefined}
-                      onFigureSelect={agentId === "editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined}
+                      onTextSelect={agentId === "author-editor" ? setSelectedText : undefined}
+                      onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined}
                     />
                   </div>
-                  {agentId === "editor" && <footer>Select text or click a figure to scope the next edit.</footer>}
+                  {agentId === "author-editor" && <footer>Select text or click a figure to scope the next edit.</footer>}
                 </article>
               )}
               {messages.map((message) => (
                 <article key={message.id} className={`message ${message.role}`}>
                   <div className="message-avatar">{message.role === "user" ? "O" : <Sparkles size={15} />}</div>
-                  <div className="message-content"><div className="message-meta"><strong>{message.role === "user" ? "You" : agent.name}</strong><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>{message.role === "assistant" ? <RichMessage content={message.content} vaultPath={vaultPath} selectedFigure={selectedFigure?.path} onFigureSelect={agentId === "editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined} /> : <p>{message.content}</p>}</div>
+                  <div className="message-content">
+                    <div className="message-meta"><strong>{message.role === "user" ? "You" : agent.name}</strong><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>
+                    {message.role === "assistant"
+                      ? <><RichMessage content={message.content} vaultPath={vaultPath} selectedFigure={selectedFigure?.path} onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined} /><TokenUsageSummary usage={message.tokenUsage} unavailable={message.tokenUsage === null} /></>
+                      : <p>{message.content}</p>}
+                  </div>
                   {message.role === "user" && <button className="message-edit" disabled={running} onClick={() => { setEditing(message.id); setPrompt(message.content); }} title="Edit question"><Pencil size={14} /></button>}
                 </article>
               ))}
@@ -702,9 +722,9 @@ export default function App() {
             {error && <div className="error-banner"><span>{error}</span><button onClick={() => setError(null)}><X size={13} /></button></div>}
             <div className={`composer ${dragging ? "dragging" : ""} ${editing ? "editing" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={drop}>
               {editing && <div className="editing-banner"><Pencil size={13} />Editing stored question<button onClick={() => { setEditing(null); setPrompt(""); }}><X size={13} /></button></div>}
-              {agentId === "editor" && note && (
+              {agentId === "author-editor" && note && (
                 <div className="edit-target-tray">
-                  <div className="edit-target-heading"><Pencil size={13} /><strong>Edit target</strong><span>{selectedText || selectedFigure ? "Scoped selection" : "Whole note"}</span></div>
+                  <div className="edit-target-heading"><Pencil size={13} /><strong>Edit target</strong><span>{selectedText || selectedFigure ? "Scoped selection" : "Scope from request"}</span></div>
                   <div className="edit-target-items">
                     <span className="edit-target-note"><FileText size={14} /><span><strong>{note.name}</strong><small>Selected note</small></span></span>
                     {selectedText && <span className="edit-target-text"><span>“{selectedText.replace(/\s+/g, " ").slice(0, 100)}{selectedText.length > 100 ? "…" : ""}”</span><button onClick={() => setSelectedText("")} aria-label="Remove selected text"><X size={12} /></button></span>}
@@ -750,7 +770,7 @@ export default function App() {
         </div>
         <div className="selected-context">
           <div className="section-label"><span>SELECTED NOTE</span><ChevronDown size={14} /></div>
-          {note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div><p>{note.content?.slice(0, 220).replace(/[#*`>-]/g, " ") || "Note selected as model context."}</p>{agentId === "editor" && <button className="view-note-button" onClick={() => setNoteInChat(true)}><Eye size={14} />{noteInChat ? "Note open in chat" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}
+          {note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div><p>{note.content?.slice(0, 220).replace(/[#*`>-]/g, " ") || "Note selected as model context."}</p>{agentId === "author-editor" && <button className="view-note-button" onClick={() => setNoteInChat(true)}><Eye size={14} />{noteInChat ? "Note open in chat" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}
         </div>
       </aside>
     </main>

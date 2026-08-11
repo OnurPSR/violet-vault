@@ -20,9 +20,27 @@ Then read only the renderer references needed by the source:
 - [mermaid.md](references/mermaid.md) before writing a Mermaid block.
 - [latex-and-matrices.md](references/latex-and-matrices.md) before transcribing mathematical notation or deciding how to render a matrix or tensor.
 
+## Inputs
+
+This mode receives three inputs:
+
+- `image_paths`: ordered handwritten page-image paths; required.
+- `note_file_path`: target note path relative to the vault; required.
+- `prompt`: additional reconstruction instructions; optional.
+
+Keep these mode-specific names here: Violet Vault supplies the values, the author-editor contract selects `APPEND_RECONSTRUCTION`, and this skill consumes them.
+
+## Asset path conventions
+
+Use the following vault-relative locations as the Violet Vault default.
+
+- Source images: `attachments/{note_name}/notes/{image}`
+- Editable Excalidraw sources: `attachments/{note_name}/excalidraw_md/{figure}.excalidraw.md`
+- Exported Excalidraw SVGs: `attachments/{note_name}/excalidraw_img/{figure}.svg`
+
 ## Reconstruction workflow
 
-1. Resolve the target note, ordered source batch, and the vault's existing attachment and diagram conventions.
+1. Resolve `note_file_path`, preserve the order of `image_paths`, and apply `prompt` when present.
 2. Inspect every source page at full available resolution before writing. Build a page map and identify cross-page continuations.
 3. Recover each page's reading graph from connectors, containment, alignment, numbering, and only then geometric reading order.
 4. Divide the target content into numbered page sections. Reconstruct one source page within each corresponding section.
@@ -37,8 +55,8 @@ Then read only the renderer references needed by the source:
    | Geometry, free placement, coordinate space, irregular grouping, large annotated matrix, or layout-sensitive figure | Excalidraw |
    | Page whose meaning depends on its global placement | Page-scale Excalidraw reconstruction plus concise Markdown |
 
-7. Create and verify every referenced asset before embedding it. Preserve editable Excalidraw sources and embed their SVG exports.
-8. End each page section with that page's source image at `attachments/{note_name}/{image}`. Place no reconstruction content between this embed and the next page heading.
+7. Create and verify every referenced asset before embedding it. Store editable Excalidraw sources and their SVG exports according to the asset path conventions.
+8. End each page section with its corresponding source-image embed, using the path defined in the asset path conventions. Place no reconstruction content between that embed and the next page heading.
 9. Run the separate note-validation workflow on the note, embeds, math, and rendered visuals affected by the reconstruction.
 
 ## Page-section contract
@@ -50,16 +68,16 @@ Use this structure unless the target note already has a compatible page conventi
 
 <!-- reconstruction of source page 1 -->
 
-![[attachments/{note_name}/{image}]]
+![[attachments/{note_name}/notes/{image}]]
 
 ## Page 2
 
 <!-- reconstruction of source page 2 -->
 
-![[attachments/{note_name}/{image}]]
+![[attachments/{note_name}/notes/{image}]]
 ```
 
-Derive `{note_name}` from the target note basename and preserve the source image filename when it is safe and unambiguous. Use the vault's exact path casing. Copy a source image into the attachment location; never move or rewrite the supplied source.
+Derive `{note_name}` from the target note basename and preserve the source image filename when it is safe and unambiguous. Use the vault's exact path casing.
 
 ## Representation decisions
 

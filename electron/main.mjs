@@ -8,11 +8,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as pty from "node-pty";
 import { sanitizeVaultSvg } from "./assets.mjs";
+import { validateEditContextRevision } from "./edit-context.mjs";
 import { loadAgentInstructions } from "./instructions.mjs";
+import { cleanupUnreferencedUploadedPages, saveUploadedPages } from "./page-staging.mjs";
 import { buildInteractiveInvocation, buildInvocation } from "./runner.mjs";
+import { extractTerminalTokenUsage, normalizeCodexUsage, parseClaudeRunOutput } from "./token-usage.mjs";
+import { auditVaultChanges, authorizedWritePaths, captureVaultManifest, formatScopeWarning } from "./vault-scope.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(currentDirectory, "..");
+const agentProjectRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : projectRoot;
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic"]);
 const VAULT_FIGURE_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ".svg"]);
 const activeRuns = new Map();
@@ -31,6 +36,11 @@ const defaultState = {
   effort: "high",
 };
 
+function cleanAgentId(value) {
+  if (value === "editor" || value === "author") return "author-editor";
+  return value === "author-editor" ? value : "retriever";
+}
+
 function statePath() {
   return path.join(app.getPath("userData"), "violet-vault-state.json");
 }
@@ -40,7 +50,7 @@ function cleanState(value) {
   const conversations = Array.isArray(value.conversations)
     ? value.conversations.slice(0, 500).filter((conversation) => conversation && typeof conversation === "object").map((conversation) => ({
       ...conversation,
-      agent: ["retriever", "editor", "author"].includes(conversation.agent) ? conversation.agent : "retriever",
+      agent: cleanAgentId(conversation.agent),
       terminalTranscript: typeof conversation.terminalTranscript === "string"
         ? conversation.terminalTranscript.slice(0, MAX_TERMINAL_TRANSCRIPT_CHARS)
         : undefined,
@@ -49,7 +59,7 @@ function cleanState(value) {
   return {
     conversations,
     vaultPath: typeof value.vaultPath === "string" ? value.vaultPath : null,
-    agentId: ["retriever", "editor", "author"].includes(value.agentId) ? value.agentId : "retriever",
+    agentId: cleanAgentId(value.agentId),
     provider: ["codex", "claude", "local"].includes(value.provider) ? value.provider : "codex",
     model: typeof value.model === "string" ? value.model : "gpt-5.6-sol",
     effort: ["low", "medium", "high"].includes(value.effort) ? value.effort : "high",
@@ -215,8 +225,38 @@ async function stageImages(images) {
   }
 }
 
+async function prepareRunImages(request) {
+  if (request.agentId === "author-editor" && Array.isArray(request.images) && request.images.length > 0) {
+    const pages = await saveUploadedPages(request);
+    return { paths: [], directories: [], imagePaths: pages.map((page) => page.vaultPath), uploadedPages: pages };
+  }
+  const staged = await stageImages(request.images);
+  return { ...staged, imagePaths: [], uploadedPages: [] };
+}
+
 async function cleanupStagedImages(directories) {
   await Promise.all((directories ?? []).map((directory) => rm(directory, { recursive: true, force: true })));
+}
+
+async function cleanupUnusedAuthorPages(request, pages) {
+  if (!request.notePath || !pages?.length) return;
+  await cleanupUnreferencedUploadedPages({
+    vaultPath: request.vaultPath,
+    notePath: request.notePath,
+    pages,
+  });
+}
+
+async function scopeWarning(request, before) {
+  if (!before || request.agentId !== "author-editor") return "";
+  const after = await captureVaultManifest(request.vaultPath);
+  return formatScopeWarning(auditVaultChanges(before, after, authorizedWritePaths(request)));
+}
+
+function requestedBinary(request) {
+  if (request.provider === "codex") return "codex";
+  if (request.provider === "claude") return "claude";
+  throw new Error("Local LLM support is display-only for now.");
 }
 
 function executableCandidates(name) {
@@ -314,6 +354,7 @@ function runCodexAppServer(binary, invocation, cwd, sender) {
     let stderr = "";
     let activeItemId = null;
     let finalText = "";
+    let tokenUsage = null;
     let settled = false;
 
     const finish = (error, output = "") => {
@@ -322,7 +363,7 @@ function runCodexAppServer(binary, invocation, cwd, sender) {
       activeRuns.delete(sender.id);
       if (!child.killed) child.kill("SIGTERM");
       if (error) reject(error);
-      else resolve(output);
+      else resolve({ output, tokenUsage });
     };
     const write = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
     const stream = (event) => {
@@ -370,6 +411,14 @@ function runCodexAppServer(binary, invocation, cwd, sender) {
         }
         return;
       }
+      if (message.method === "thread/tokenUsage/updated") {
+        tokenUsage = normalizeCodexUsage(message.params?.tokenUsage) ?? tokenUsage;
+        return;
+      }
+      if (message.method === "rawResponse/completed" && !tokenUsage) {
+        tokenUsage = normalizeCodexUsage(message.params?.usage) ?? tokenUsage;
+        return;
+      }
       if (message.method === "turn/completed") {
         const turn = message.params?.turn;
         if (turn?.status === "failed") return finish(new Error(turn.error?.message || "The Codex turn failed."));
@@ -412,21 +461,32 @@ function runCodexAppServer(binary, invocation, cwd, sender) {
 async function executeAgent(request, sender) {
   if (!request || typeof request.vaultPath !== "string") throw new Error("Select an Obsidian vault first.");
   const vault = await scanVault(request.vaultPath);
-  const requestWithNote = validateSelectedNote(request, vault);
-  const instructions = await loadAgentInstructions(projectRoot, request.agentId);
-  const staged = await stageImages(request.images);
+  const requestWithNote = await validateEditContextRevision(validateSelectedNote(request, vault));
+  const instructions = await loadAgentInstructions(agentProjectRoot, request.agentId);
+  const binaryName = requestedBinary(requestWithNote);
+  const binary = await findExecutable(binaryName);
+  if (!binary) throw new Error(`${binaryName === "codex" ? "Codex" : "Claude"} CLI was not found. Install it and restart Violet Vault.`);
+  const before = request.agentId === "author-editor" ? await captureVaultManifest(request.vaultPath) : null;
+  const staged = await prepareRunImages(requestWithNote);
   try {
     const invocation = buildInvocation({
       ...requestWithNote,
       images: staged.paths,
       imageDirectories: staged.directories,
+      imagePaths: staged.imagePaths,
     }, instructions);
-    const binary = await findExecutable(invocation.binary);
-    if (!binary) throw new Error(`${invocation.binary === "codex" ? "Codex" : "Claude"} CLI was not found. Install it and restart Violet Vault.`);
-    const output = request.provider === "codex"
+    const result = request.provider === "codex"
       ? await runCodexAppServer(binary, invocation, request.vaultPath, sender)
-      : await runChild(binary, invocation.args, request.vaultPath, sender.id);
-    return { output, provider: request.provider };
+      : parseClaudeRunOutput(await runChild(binary, invocation.args, request.vaultPath, sender.id));
+    await cleanupUnusedAuthorPages(requestWithNote, staged.uploadedPages);
+    return {
+      output: `${result.output}${await scopeWarning(requestWithNote, before)}`,
+      provider: request.provider,
+      tokenUsage: result.tokenUsage,
+    };
+  } catch (error) {
+    await cleanupUnusedAuthorPages(requestWithNote, staged.uploadedPages);
+    throw error;
   } finally {
     await cleanupStagedImages(staged.directories);
   }
@@ -443,14 +503,19 @@ async function startTerminalSession(request, sender, dimensions = {}) {
   if (terminalSessions.has(sender.id)) throw new Error("A Codex terminal session is already running.");
 
   const vault = await scanVault(request.vaultPath);
-  const requestWithNote = validateSelectedNote(request, vault);
+  const requestWithNote = await validateEditContextRevision(validateSelectedNote(request, vault));
 
-  const instructions = await loadAgentInstructions(projectRoot, request.agentId);
-  const staged = await stageImages(request.images);
+  const instructions = await loadAgentInstructions(agentProjectRoot, request.agentId);
+  const binary = await findExecutable(requestedBinary(requestWithNote));
+  if (!binary) throw new Error("Codex CLI was not found. Install it and restart Violet Vault.");
+  const before = request.agentId === "author-editor" ? await captureVaultManifest(request.vaultPath) : null;
+  const staged = await prepareRunImages(requestWithNote);
   try {
-    const invocation = buildInteractiveInvocation({ ...requestWithNote, images: staged.paths }, instructions);
-    const binary = await findExecutable(invocation.binary);
-    if (!binary) throw new Error("Codex CLI was not found. Install it and restart Violet Vault.");
+    const invocation = buildInteractiveInvocation({
+      ...requestWithNote,
+      images: staged.paths,
+      imagePaths: staged.imagePaths,
+    }, instructions);
 
     const sessionId = randomUUID();
     const terminal = pty.spawn(binary, invocation.args, {
@@ -463,17 +528,36 @@ async function startTerminalSession(request, sender, dimensions = {}) {
     const session = { id: sessionId, terminal, stagedDirectories: staged.directories, vaultPath: request.vaultPath };
     terminalSessions.set(sender.id, session);
 
+    let terminalUsageBuffer = "";
+
     terminal.onData((data) => {
+      terminalUsageBuffer = `${terminalUsageBuffer}${data}`.slice(-64_000);
       if (!sender.isDestroyed()) sender.send("agent:terminal-data", { sessionId, data });
     });
-    terminal.onExit(({ exitCode, signal }) => {
+    terminal.onExit(async ({ exitCode, signal }) => {
       if (terminalSessions.get(sender.id)?.id === sessionId) terminalSessions.delete(sender.id);
-      if (!sender.isDestroyed()) sender.send("agent:terminal-exit", { sessionId, exitCode, signal });
-      void cleanupStagedImages(staged.directories);
+      let warning = "";
+      try {
+        await cleanupUnusedAuthorPages(requestWithNote, staged.uploadedPages);
+        warning = await scopeWarning(requestWithNote, before);
+      } catch (error) {
+        warning = `\n\nPost-run safety check failed: ${error.message}`;
+      }
+      await cleanupStagedImages(staged.directories);
+      if (!sender.isDestroyed()) {
+        if (warning) sender.send("agent:terminal-data", { sessionId, data: warning });
+        sender.send("agent:terminal-exit", {
+          sessionId,
+          exitCode,
+          signal,
+          tokenUsage: extractTerminalTokenUsage(terminalUsageBuffer),
+        });
+      }
     });
 
     return { sessionId };
   } catch (error) {
+    await cleanupUnusedAuthorPages(requestWithNote, staged.uploadedPages);
     await cleanupStagedImages(staged.directories);
     throw error;
   }

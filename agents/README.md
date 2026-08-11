@@ -3,8 +3,8 @@
 Each specialist loads `shared/AGENTS.md` (optional) and then its own role file:
 
 - `retriever/AGENTS.md` — read-only vault search and evidence retrieval.
-- `editor/AGENTS.md` — minimal scoped patches to existing notes.
-- `author/AGENTS.md` — new notes, append-only additions, and owned revisions.
+- `author-editor/AGENTS.md` — reconstruction, insertion, and scoped editing in a
+  designated target note.
 
 A role file is a durable contract: role, task-mode routing, authorization and
 immutability boundaries, path security, and validation entry points. Long
@@ -13,10 +13,10 @@ task-specific procedure belongs in a skill beside the contract:
 ```text
 agents/<role>/
   AGENTS.md
-  skills/<skill-name>/
+  .agents/skills/<skill-name>/
     SKILL.md          workflow and pointers
     references/       detail loaded on demand
-    scripts/          executable validators plus their tests
+    scripts/          executable validators
     assets/           templates used in output
 ```
 
@@ -27,17 +27,18 @@ relative reference from a contract to its skill would not resolve.
 
 The Electron desktop interface passes the selected role, model configuration,
 vault path, note, prompt, conversation context, and staged images to the local
-Codex or Claude CLI bridge. Local LLM support is display-only for now.
+Codex or Claude CLI bridge. Packaged builds unpack `agents/` from the application
+archive so those external CLIs can read every advertised absolute skill path.
+Local LLM support is display-only for now.
 
 ## Validators
 
-The author skill ships two standard-library Python validators with their own
-tests:
+The Author–Editor validation skill ships Node.js validators. For example:
 
 ```bash
-cd agents/author/skills/handwritten-note-author
-python3 -m unittest discover -s scripts/tests -t scripts/tests
+node /absolute/path/to/agents/author-editor/.agents/skills/note-validation/scripts/validate_note.mjs \
+  --vault /path/to/vault --note Notes/example.md
 ```
 
-They operate on temporary fixtures. Never point them at a real vault note while
-testing.
+Run only the validator required by the selected workflow. Reports should be
+written outside the vault.

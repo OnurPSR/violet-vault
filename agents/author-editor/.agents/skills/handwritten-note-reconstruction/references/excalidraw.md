@@ -29,11 +29,10 @@ Use consistent stroke width, font family, arrowheads, corner radius, and interna
 
 ## Store and embed assets
 
-- Follow the target vault's established Excalidraw and SVG directories and naming pattern.
-- Preserve the editable `.excalidraw` source.
-- Export an SVG from the completed drawing and embed the SVG inline in the note.
+- Follow the target vault's established Excalidraw and SVG directories and
+  naming pattern when one exists; otherwise use the reconstruction skill's
+  default asset directories.
 - Use an embed width proportional to the figure's source prominence; avoid arbitrary one-size widths.
-- Keep the source and SVG names paired and unambiguous.
 - Do not create an embed until both the source drawing and SVG export exist.
 
 ## Check the rendered figure
@@ -46,5 +45,3 @@ Confirm that:
 - relative scale and reading direction match the source;
 - strokes, text, and fills remain readable in the relevant theme;
 - the editable source and exported SVG depict the same revision.
-
-If the required Excalidraw creation or export path is unavailable, do not imitate an Excalidraw embed with a placeholder file. Leave the note free of dead assets and report the missing capability.

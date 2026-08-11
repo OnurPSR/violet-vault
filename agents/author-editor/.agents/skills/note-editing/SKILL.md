@@ -42,17 +42,16 @@ When editing or converting a renderer-specific visual, also read the applicable 
    | Visual change | Update the semantic visual unit, its attached text, editable source, export, and embed as applicable |
    | Repeated note-wide change | Resolve every in-scope occurrence first, then apply consistently |
 
-5. Apply one minimal coherent edit. Do not mix opportunistic cleanup into the requested transformation.
-6. Re-read the modified region with its neighbors and reconcile only dependencies made stale by the edit.
-7. Hand the result to the separate note-validation workflow.
+5. When multiple independent parts are selected, process them separately in selection order. For each part, complete its visual edit first and its paragraph edit second before moving to the next part; skip any edit type not requested and do not batch parts together.
+6. Apply one minimal coherent edit. Do not mix opportunistic cleanup into the requested transformation.
+7. Re-read the modified region with its neighbors and reconcile only dependencies made stale by the edit.
+8. Hand the result to the separate note-validation workflow.
 
 ## Write-boundary rules
 
 For `EDIT_SELECTED_NOTE`, treat the exact selection range as the default write boundary. Read outside it freely for context, but preserve unselected content. When the selection cuts through an atomic Markdown or visual structure, edit the smallest containing unit only as required to keep it valid; preserve its unselected content unchanged.
 
 For `EDIT_NOTE`, resolve the smallest unique note region that satisfies the request. A note-wide request may make the entire note the writable boundary, but a request naming one heading, equation, figure, or phrase does not.
-
-An embedded asset enters the write boundary only when the request targets the asset's visual content. Editing an embed path or caption alone does not authorize changing the underlying asset.
 
 ## Coherent-change rules
 

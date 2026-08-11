@@ -1,12 +1,24 @@
-export type AgentId = "retriever" | "editor" | "author";
+export type AgentId = "retriever" | "author-editor";
 export type ProviderId = "codex" | "claude" | "local";
 export type Effort = "low" | "medium" | "high";
+
+export type TokenUsage = {
+  provider: "codex" | "claude";
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  modelContextWindow: number | null;
+};
 
 export type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
   createdAt: number;
+  tokenUsage?: TokenUsage | null;
 };
 
 export type Conversation = {
@@ -18,6 +30,7 @@ export type Conversation = {
   effort: Effort;
   messages: Message[];
   terminalTranscript?: string;
+  terminalTokenUsage?: TokenUsage | null;
   updatedAt: number;
 };
 
@@ -34,10 +47,23 @@ export type Attachment = {
   type: string;
 };
 
+export type SourcePosition = {
+  offset: number;
+  line: number;
+  character: number;
+};
+
 export type EditContext = {
   selectedText: string | null;
   figurePath: string | null;
   figureAlt: string | null;
+  noteRevision: string | null;
+  selectionMatch: "exact" | "ambiguous" | "rendered-only" | null;
+  selectionOccurrenceCount: number | null;
+  selectionStart: SourcePosition | null;
+  selectionEnd: SourcePosition | null;
+  selectionPrefix: string | null;
+  selectionSuffix: string | null;
 };
 
 export type CliStatus = {
@@ -81,6 +107,7 @@ export type TerminalExitEvent = {
   sessionId: string;
   exitCode: number;
   signal?: number;
+  tokenUsage?: TokenUsage | null;
 };
 
 export type AgentStreamEvent = {
@@ -100,7 +127,7 @@ export type VioletBridge = {
   chooseImages(): Promise<Attachment[]>;
   pathForFile(file: File): string;
   checkCli(): Promise<CliStatus>;
-  runAgent(request: RunRequest): Promise<{ output: string; provider: Exclude<ProviderId, "local"> }>;
+  runAgent(request: RunRequest): Promise<{ output: string; provider: Exclude<ProviderId, "local">; tokenUsage: TokenUsage | null }>;
   stopAgent(): Promise<{ stopped: boolean }>;
   onAgentStream(callback: (event: AgentStreamEvent) => void): () => void;
   startCodexTerminal(request: RunRequest, dimensions: TerminalDimensions): Promise<{ sessionId: string }>;

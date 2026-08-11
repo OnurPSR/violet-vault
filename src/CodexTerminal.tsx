@@ -4,6 +4,8 @@ import "@xterm/xterm/css/xterm.css";
 import { CircleStop, Command, Paperclip, X } from "lucide-react";
 import { type DragEvent, useEffect, useRef, useState } from "react";
 import type { RunRequest, TerminalExitEvent } from "./types";
+import type { TokenUsage } from "./types";
+import TokenUsageSummary from "./TokenUsageSummary";
 
 type Props = {
   request: RunRequest;
@@ -12,9 +14,10 @@ type Props = {
   onExit(event: TerminalExitEvent): void;
   onError(error: Error): void;
   onClose(): void;
+  tokenUsage?: TokenUsage | null;
 };
 
-export default function CodexTerminal({ request, onStarted, onData, onExit, onError, onClose }: Props) {
+export default function CodexTerminal({ request, onStarted, onData, onExit, onError, onClose, tokenUsage }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const sessionId = useRef<string | null>(null);
@@ -184,8 +187,9 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
         {dragging && <div className="terminal-drop-overlay"><Paperclip size={22} /><strong>Drop images into the Codex prompt</strong></div>}
       </div>
       <footer className="terminal-footer">
-        <span>Everything you type is sent directly to Codex</span>
-        <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> answer choices · slash commands and shortcuts work normally</span>
+        {status === "exited"
+          ? <TokenUsageSummary usage={tokenUsage} unavailable terminal />
+          : <><span>Everything you type is sent directly to Codex</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> answer choices · slash commands and shortcuts work normally</span></>}
       </footer>
     </section>
   );

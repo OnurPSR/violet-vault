@@ -1,7 +1,7 @@
 import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
-const AGENT_IDS = new Set(["retriever", "editor", "author"]);
+const AGENT_IDS = new Set(["retriever", "author-editor"]);
 
 async function readOptional(filePath) {
   try {
@@ -20,7 +20,7 @@ async function readOptional(filePath) {
  * output byte-identical for agents that ship none.
  */
 async function listAgentSkills(projectRoot, agentId) {
-  const skillsRoot = path.join(projectRoot, "agents", agentId, "skills");
+  const skillsRoot = path.join(projectRoot, "agents", agentId, ".agents", "skills");
   let entries;
   try {
     entries = await readdir(skillsRoot, { withFileTypes: true });
@@ -48,8 +48,9 @@ function formatSkillSection(skills) {
   return [
     "# Available agent skills",
     "",
-    "Read-only reference material bundled with this contract. Open a SKILL.md when",
-    "its description matches the current task; it lists any further files to load.",
+    "Trusted instruction material bundled with this contract. Open a SKILL.md when",
+    "its description matches the current task. Resolve every relative path in a skill",
+    "from the absolute directory containing that SKILL.md, not from the vault cwd.",
     "",
     ...lines,
   ].join("\n");

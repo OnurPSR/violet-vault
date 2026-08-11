@@ -44,10 +44,7 @@ Treat a label beside an axis, text inside a box, a formula under a brace, and a 
 
 ## Number and attach pages
 
-- Number sections by source-batch order: `## Page 1`, `## Page 2`, and so on.
 - Preserve a handwritten page number inside the reconstruction when it differs from batch order; do not use it to silently reorder the batch.
 - Continue a cross-page sentence or derivation in the next page section while preserving the page boundary.
-- Store each copied source image at `attachments/{note_name}/{image}`.
 - Place its embed as the final content of the corresponding page section.
-- If filenames collide, use a stable page-qualified filename such as `page-02-{image}` and update only the new embed.
 - Do not reuse one page image for multiple page sections or attach an unverified image by basename alone.

@@ -11,20 +11,32 @@ Violet Vault is a **local Electron desktop application** for operating AI agents
 - Raw PTY streaming for Codex output, keyboard input, resize, interrupts, numbered choices, approvals, and slash commands.
 - A Claude CLI request/response adapter.
 - Display-only Local LLM option reserved for a later adapter.
-- Three prompt contracts under `agents/`: Retriever, Scoped Editor, and Note Author.
+- Two prompt contracts under `agents/`: Retriever and the combined Note Author–Editor.
 - Local conversation history with replayable Codex terminal transcripts, native session controls, question editing, and process cancellation.
+- Provider-reported token consumption displayed beneath completed responses and
+  saved terminal sessions, including input, cached input, output, and total
+  tokens when available.
 - Automatic refresh of the note index after an agent run.
 
 ## Safety model
 
 - The renderer has no direct Node.js or filesystem access. A narrow Electron preload bridge exposes only the operations used by the interface.
 - CLI arguments are passed directly to a child process with `shell: false`.
-- Retriever starts Codex with `--sandbox read-only`; Editor and Author start with vault-scoped `workspace-write`.
-- Interactive Codex sessions use `--ask-for-approval on-request`, so questions, numbered choices, and approval requests remain visible and answerable in the embedded terminal. Claude Retriever uses `plan`; Claude write roles use `acceptEdits`.
-- Attached source images are copied to a temporary staging directory before a run, so agents do not receive the original attachment as a write target.
+- Retriever starts Codex with `--sandbox read-only`; Author–Editor starts with vault-scoped `workspace-write`.
+- Interactive Codex sessions use `--ask-for-approval on-request`, so questions, numbered choices, and approval requests remain visible and answerable in the embedded terminal. Claude Retriever uses `plan`; Claude Author–Editor uses `acceptEdits`.
+- Author–Editor uploads are copied to `attachments/{note_name}/notes/`, then passed to the agent as paths rather than image inputs. Retriever images continue to use temporary staging.
+- Author–Editor selections carry a note revision fingerprint, raw Markdown range
+  when uniquely resolvable, and surrounding anchors. Stale selections are
+  rejected before a CLI starts.
+- Uploaded pages that are not embedded by the completed run are removed, and a
+  post-run manifest audit reports writes outside the selected note and its
+  authorized companion assets.
 - Note reads reject traversal outside the selected vault. Hidden folders, `.obsidian`, symlinks, and `node_modules` are excluded from indexing.
 
-The agent contracts remain the semantic safety layer for append-only and scoped edits. Review important vault changes and keep your vault under version control or regular backup.
+The agent contracts and structured write authorization remain the preventive
+safety layer for scoped edits; the manifest audit is detective and does not
+automatically revert out-of-scope changes. Review important vault changes and
+keep your vault under version control or regular backup.
 
 ## Prerequisites
 

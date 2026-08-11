@@ -6,11 +6,17 @@ Identify:
 
 - the exact target note path;
 - the requested transformation;
-- the active selection range and selected text, when present;
+- the active selection range, selected text, note revision fingerprint, and
+  surrounding anchors, when present;
 - explicitly named headings, figures, equations, phrases, or properties;
 - whether the request applies once, within a section, or throughout the note.
 
-Confirm that the current text at the supplied line and character positions still matches the selected content. If positions are stale, relocate the selection only from a unique exact match plus its surrounding context.
+When source offsets are supplied, confirm that the current note revision and
+text at those offsets still match the selection. If offsets are unavailable or
+stale, relocate only from a unique exact match that agrees with the supplied
+prefix and suffix anchors. Rendered-only or ambiguous selections do not define
+an exact write range; resolve a unique structural unit from the user's request
+or ask before modifying it.
 
 ## Determine the writable boundary
 
@@ -25,22 +31,6 @@ Use this priority:
 5. a broader section or note-wide scope only when the request requires it.
 
 Do not choose among multiple plausible matches silently.
-
-## Respect atomic structures
-
-Treat these as syntactic or semantic units:
-
-- YAML frontmatter;
-- a heading and, when requested, its subtree;
-- a fenced code or Mermaid block;
-- a display-math environment;
-- a Markdown table;
-- a list item with its nested children;
-- a callout with its contained blocks;
-- an embed with its source-attached caption;
-- an Excalidraw source and its exported SVG when visual content changes.
-
-If a selection intersects only part of an atomic unit, preserve everything outside the selection while editing the complete unit only as needed for validity. Ask for clarification only when this necessary expansion would materially alter unselected content.
 
 ## Resolve compound requests
 

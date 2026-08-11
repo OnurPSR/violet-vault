@@ -1063,6 +1063,43 @@ textarea:disabled {
   white-space: pre-wrap;
 }
 
+.token-usage {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  margin-top: 12px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+  color: #77707c;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.token-usage svg {
+  flex: 0 0 auto;
+  color: #91849f;
+}
+
+.token-usage strong {
+  color: #aaa2af;
+  font-weight: 600;
+}
+
+.terminal-token-usage {
+  flex-wrap: nowrap;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: #736c79;
+  white-space: nowrap;
+}
+
+.terminal-token-usage span {
+  flex: 0 0 auto;
+}
+
 .rich-message {
   margin-top: 10px;
   color: #c9c3ce;

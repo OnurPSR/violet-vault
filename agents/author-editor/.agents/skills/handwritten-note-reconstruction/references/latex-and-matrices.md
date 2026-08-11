@@ -22,8 +22,6 @@ Use LaTeX when the complete matrix:
 - does not need aggressive shrinking or a representative layout;
 - functions as notation rather than as a visual object.
 
-A matrix of roughly `4 × 4` or less often qualifies, but legibility and attached structure decide—not the numeric threshold alone.
-
 ## Draw a large or spatial matrix
 
 Use Excalidraw when the matrix or tensor is large, dimensioned, sliced, highlighted, indexed by surrounding labels, or used as a spatial explanation.
@@ -48,5 +46,3 @@ $$
 
 - Keep short derivations in one display block when their sequence is linear.
 - Use Excalidraw when arrows branch, circle back, point into a figure, or depend on two-dimensional placement.
-- Do not place display-math delimiters inside code fences or Mermaid labels.
-- Check notation visually at the final embed width, especially nested fractions, scripts, and matrix entries.
