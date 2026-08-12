@@ -12,6 +12,7 @@ import { validateEditContextRevision } from "./edit-context.mjs";
 import { loadAgentInstructions } from "./instructions.mjs";
 import { cleanupUnreferencedUploadedPages, saveUploadedPages } from "./page-staging.mjs";
 import { buildInteractiveInvocation, buildInvocation } from "./runner.mjs";
+import { cleanState, defaultState, serializeStateWithinBudget } from "./state-storage.mjs";
 import { extractTerminalTokenUsage, normalizeCodexUsage, parseClaudeRunOutput } from "./token-usage.mjs";
 import { auditVaultChanges, authorizedWritePaths, captureVaultManifest, formatScopeWarning } from "./vault-scope.mjs";
 
@@ -25,45 +26,9 @@ const terminalSessions = new Map();
 const MAX_NOTES = 10_000;
 const MAX_NOTE_PREVIEW_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
-const MAX_TERMINAL_TRANSCRIPT_CHARS = 8 * 1024 * 1024;
-
-const defaultState = {
-  conversations: [],
-  vaultPath: null,
-  agentId: "retriever",
-  provider: "codex",
-  model: "gpt-5.6-sol",
-  effort: "high",
-};
-
-function cleanAgentId(value) {
-  if (value === "editor" || value === "author") return "author-editor";
-  return value === "author-editor" ? value : "retriever";
-}
 
 function statePath() {
   return path.join(app.getPath("userData"), "violet-vault-state.json");
-}
-
-function cleanState(value) {
-  if (!value || typeof value !== "object") return defaultState;
-  const conversations = Array.isArray(value.conversations)
-    ? value.conversations.slice(0, 500).filter((conversation) => conversation && typeof conversation === "object").map((conversation) => ({
-      ...conversation,
-      agent: cleanAgentId(conversation.agent),
-      terminalTranscript: typeof conversation.terminalTranscript === "string"
-        ? conversation.terminalTranscript.slice(0, MAX_TERMINAL_TRANSCRIPT_CHARS)
-        : undefined,
-    }))
-    : [];
-  return {
-    conversations,
-    vaultPath: typeof value.vaultPath === "string" ? value.vaultPath : null,
-    agentId: cleanAgentId(value.agentId),
-    provider: ["codex", "claude", "local"].includes(value.provider) ? value.provider : "codex",
-    model: typeof value.model === "string" ? value.model : "gpt-5.6-sol",
-    effort: ["low", "medium", "high"].includes(value.effort) ? value.effort : "high",
-  };
 }
 
 async function readState() {
@@ -76,8 +41,7 @@ async function readState() {
 }
 
 async function saveState(value) {
-  const serialized = JSON.stringify(cleanState(value), null, 2);
-  if (Buffer.byteLength(serialized) > 20 * 1024 * 1024) throw new Error("Chat history is too large to save.");
+  const serialized = serializeStateWithinBudget(value);
   const target = statePath();
   const temporary = `${target}.tmp`;
   await mkdir(path.dirname(target), { recursive: true });
@@ -496,7 +460,7 @@ function terminalSize(value, fallback, minimum, maximum) {
   return Number.isInteger(value) ? Math.min(maximum, Math.max(minimum, value)) : fallback;
 }
 
-async function startTerminalSession(request, sender, dimensions = {}) {
+async function startTerminalSession(request, sender, dimensions = {}, requestedClientSessionId) {
   if (!request || request.provider !== "codex" || typeof request.vaultPath !== "string") {
     throw new Error("Select an Obsidian vault and Codex before starting a terminal session.");
   }
@@ -518,6 +482,9 @@ async function startTerminalSession(request, sender, dimensions = {}) {
     }, instructions);
 
     const sessionId = randomUUID();
+    const clientSessionId = typeof requestedClientSessionId === "string" && requestedClientSessionId.length <= 128
+      ? requestedClientSessionId
+      : randomUUID();
     const terminal = pty.spawn(binary, invocation.args, {
       name: "xterm-256color",
       cols: terminalSize(dimensions.cols, 100, 20, 400),
@@ -532,7 +499,7 @@ async function startTerminalSession(request, sender, dimensions = {}) {
 
     terminal.onData((data) => {
       terminalUsageBuffer = `${terminalUsageBuffer}${data}`.slice(-64_000);
-      if (!sender.isDestroyed()) sender.send("agent:terminal-data", { sessionId, data });
+      if (!sender.isDestroyed()) sender.send("agent:terminal-data", { clientSessionId, sessionId, data });
     });
     terminal.onExit(async ({ exitCode, signal }) => {
       if (terminalSessions.get(sender.id)?.id === sessionId) terminalSessions.delete(sender.id);
@@ -545,8 +512,9 @@ async function startTerminalSession(request, sender, dimensions = {}) {
       }
       await cleanupStagedImages(staged.directories);
       if (!sender.isDestroyed()) {
-        if (warning) sender.send("agent:terminal-data", { sessionId, data: warning });
+        if (warning) sender.send("agent:terminal-data", { clientSessionId, sessionId, data: warning });
         sender.send("agent:terminal-exit", {
+          clientSessionId,
           sessionId,
           exitCode,
           signal,
@@ -587,7 +555,7 @@ function registerHandlers() {
   });
   ipcMain.handle("cli:status", () => cliStatus());
   ipcMain.handle("agent:run", (event, request) => executeAgent(request, event.sender));
-  ipcMain.handle("agent:terminal-start", (event, value) => startTerminalSession(value?.request, event.sender, value?.dimensions));
+  ipcMain.handle("agent:terminal-start", (event, value) => startTerminalSession(value?.request, event.sender, value?.dimensions, value?.clientSessionId));
   ipcMain.on("agent:terminal-input", (event, value) => {
     const session = terminalSessions.get(event.sender.id);
     if (!session || session.id !== value?.sessionId || typeof value?.data !== "string" || value.data.length > 65_536) return;
@@ -610,7 +578,12 @@ function registerHandlers() {
   ipcMain.handle("agent:terminal-close", (event, sessionId) => {
     const session = terminalSessions.get(event.sender.id);
     if (!session || session.id !== sessionId) return { closed: false };
-    session.terminal.kill("SIGTERM");
+    terminalSessions.delete(event.sender.id);
+    try {
+      session.terminal.kill("SIGTERM");
+    } catch {
+      // The PTY may have exited between the session lookup and this request.
+    }
     return { closed: true };
   });
   ipcMain.handle("agent:stop", (event) => {

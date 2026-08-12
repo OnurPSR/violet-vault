@@ -39,7 +39,7 @@ If a cursor is stale, relocate it only from a unique surrounding-text match. If 
 Find the named heading and its subtree. Insert after its last substantive block and before the next heading of equal or higher level.
 
 - Keep child subsections inside the subtree.
-- Insert before a page-ending source-image embed when the section represents a reconstructed page.
+- Insert before a page-ending, non-embedded handwritten source-page link when the section represents a reconstructed page.
 - Do not append to the first same-named section when several matches exist without a unique contextual qualifier.
 
 ## Append to the note

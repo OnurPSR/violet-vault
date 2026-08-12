@@ -1,6 +1,6 @@
 ---
 name: handwritten-note-reconstruction
-description: Reconstruct handwritten source pages as page-aware Obsidian Markdown with spatially faithful visuals, equations, matrices, Mermaid diagrams, Excalidraw assets, and per-page source-image embeds. Use for APPEND_RECONSTRUCTION work when handwritten page images must be transferred into a target note without flattening their layout or visual relationships.
+description: Reconstruct handwritten source pages as page-aware Obsidian Markdown with spatially faithful visuals, equations, matrices, Mermaid diagrams, Excalidraw assets, and per-page handwritten-source links. Use for APPEND_RECONSTRUCTION work when handwritten page images must be transferred into a target note without flattening their layout or visual relationships.
 ---
 
 # Handwritten Note Reconstruction
@@ -44,7 +44,7 @@ Use the following vault-relative locations as the Violet Vault default.
 2. Inspect every source page at full available resolution before writing. Build a page map and identify cross-page continuations.
 3. Recover each page's reading graph from connectors, containment, alignment, numbering, and only then geometric reading order.
 4. Divide the target content into numbered page sections. Reconstruct one source page within each corresponding section.
-5. Preserve the page's visual hierarchy with Markdown structure and purpose-built visuals. Keep semantically attached labels, formulas, and annotations inside their figure.
+5. Preserve the page's visual hierarchy with Markdown structure and purpose-built visuals, applying the role contract's fidelity principles to each semantic unit.
 6. Choose the least complex renderer that preserves the source meaning:
 
    | Source region | Renderer |
@@ -56,8 +56,7 @@ Use the following vault-relative locations as the Violet Vault default.
    | Page whose meaning depends on its global placement | Page-scale Excalidraw reconstruction plus concise Markdown |
 
 7. Create and verify every referenced asset before embedding it. Store editable Excalidraw sources and their SVG exports according to the asset path conventions.
-8. End each page section with its corresponding source-image embed, using the path defined in the asset path conventions. Place no reconstruction content between that embed and the next page heading.
-9. Run the separate note-validation workflow on the note, embeds, math, and rendered visuals affected by the reconstruction.
+8. Close each page section according to the page-section contract below.
 
 ## Page-section contract
 
@@ -68,13 +67,13 @@ Use this structure unless the target note already has a compatible page conventi
 
 <!-- reconstruction of source page 1 -->
 
-![[attachments/{note_name}/notes/{image}]]
+[View handwritten source page 1](attachments/{note_name}/notes/{image})
 
 ## Page 2
 
 <!-- reconstruction of source page 2 -->
 
-![[attachments/{note_name}/notes/{image}]]
+[View handwritten source page 2](attachments/{note_name}/notes/{image})
 ```
 
 Derive `{note_name}` from the target note basename and preserve the source image filename when it is safe and unambiguous. Use the vault's exact path casing.
@@ -89,4 +88,4 @@ Derive `{note_name}` from the target note basename and preserve the source image
 
 ## Completion conditions
 
-The reconstruction is ready for validation only when every source page has exactly one corresponding page section, every intended figure is present and readable, each figure retains its attached text, and each page section ends with the correct source-image embed.
+The reconstruction is ready for validation only when every source page has exactly one corresponding page section, every intended figure is present, and every section satisfies the page-section contract.

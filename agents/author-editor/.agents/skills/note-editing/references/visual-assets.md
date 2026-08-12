@@ -16,8 +16,7 @@ Change only the layers required by the request. An embed-path edit does not impl
 
 ## Preserve spatial meaning
 
-- Retain meaningful relative scale, direction, alignment, containment, proximity, and reading order.
-- Keep labels, formulas, legends, and explanations inside the visual when their placement identifies a referent.
+- Apply the role contract's visual fidelity principles to the complete semantic visual unit.
 - Preserve the original visual's prominence in the note unless resizing is requested.
 - Avoid converting a spatial figure into disconnected prose or a directed graph into decorative free-form shapes.
 - Use the reconstruction visual-transfer rules when a change alters layout or representation.

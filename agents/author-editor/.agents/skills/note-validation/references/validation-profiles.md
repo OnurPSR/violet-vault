@@ -2,15 +2,15 @@
 
 ## APPEND_RECONSTRUCTION
 
-Validate Markdown, links, embeds, LaTeX, Mermaid, image metadata, and Excalidraw assets created by the reconstruction.
+Validate changed note structure and references.
 
 ## INSERT_PLAIN_CONTENT
 
-Validate the inserted Markdown and every referenced asset.
+Validate the inserted structure and references.
 
 ## EDIT_SELECTED_NOTE
 
-Validate changed syntax, dependencies, and assets. Do not fix failures outside the authorized range.
+Validate changed syntax and dependencies. Do not fix failures outside the authorized range.
 
 ## EDIT_NOTE
 

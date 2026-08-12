@@ -6,7 +6,7 @@
 - Record pixel width, height, orientation, visible page boundary, and source order.
 - Rotate only when the intended orientation is clear. Keep any corrected or enhanced image as a derivative; do not overwrite the supplied source.
 - Do not crop marginal writing, page numbers, connector endpoints, or blank space that establishes grouping.
-- Use the complete page image for the final source embed. Use crops only as temporary inspection aids.
+- Retain the complete handwritten page image as source evidence. Use crops only as temporary inspection aids.
 
 ## Build the page map
 
@@ -46,5 +46,5 @@ Treat a label beside an axis, text inside a box, a formula under a brace, and a 
 
 - Preserve a handwritten page number inside the reconstruction when it differs from batch order; do not use it to silently reorder the batch.
 - Continue a cross-page sentence or derivation in the next page section while preserving the page boundary.
-- Place its embed as the final content of the corresponding page section.
+- Close reconstructed page sections using the reconstruction skill's page-section contract.
 - Do not reuse one page image for multiple page sections or attach an unverified image by basename alone.

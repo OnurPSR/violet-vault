@@ -23,9 +23,4 @@ Choose Excalidraw instead for geometry, coordinate space, curved spatial relatio
 - Do not put display LaTeX, custom MathJax macros, or fragile HTML in labels.
 - Do not use invisible nodes, long links, or spacing characters to force geometric placement.
 - Use styling sparingly and consistently; diagram structure should carry the meaning.
-
-## Check the rendered diagram
-
-Render the block through the actual Obsidian Mermaid implementation. Confirm syntax, direction, containment, edge labels, text wrapping, theme contrast, and readability at normal note width and a narrow pane.
-
-If Mermaid changes the meaning through automatic layout, move the figure to Excalidraw rather than adding positional hacks.
+- If automatic layout changes the meaning during visual verification, move the figure to Excalidraw rather than adding positional hacks.

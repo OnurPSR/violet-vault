@@ -22,7 +22,7 @@
 - Preserve wikilink aliases, headings, and block references unless the target changes.
 - Resolve a new target before creating or changing a link.
 - Keep embed size parameters and captions unless the request changes their presentation.
-- Preserve page-source image embeds in their page-ending position during unrelated edits.
+- Preserve non-embedded handwritten source-page links in their page-ending position during unrelated edits.
 
 ## Equations and notation
 

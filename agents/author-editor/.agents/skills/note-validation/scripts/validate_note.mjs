@@ -3,7 +3,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import katex from "katex";
-import LZString from "lz-string";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -12,8 +11,7 @@ import { unified } from "unified";
 import { parseDocument } from "yaml";
 
 const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(remarkFrontmatter, ["yaml"]);
-const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"]);
-const excalidrawTypes = new Set(["rectangle", "diamond", "ellipse", "image", "text", "line", "arrow", "freedraw", "embeddable", "frame", "magicframe"]);
+const figureExtensions = new Set([".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic"]);
 
 function usage(exitCode = 0) {
   const stream = exitCode === 0 ? process.stdout : process.stderr;
@@ -102,30 +100,6 @@ function scanWikiLinks(value) {
   return found;
 }
 
-function imageMetadata(filePath) {
-  const extension = extname(filePath).toLowerCase();
-  const buffer = readFileSync(filePath);
-  if (extension === ".png" && buffer.length >= 24 && buffer.toString("ascii", 1, 4) === "PNG") {
-    return { format: "png", width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20), bytes: buffer.length };
-  }
-  if (extension === ".svg") {
-    const source = buffer.toString("utf8", 0, Math.min(buffer.length, 65536));
-    const open = source.toLowerCase().indexOf("<svg");
-    const close = source.indexOf(">", open);
-    const tag = open >= 0 && close > open ? source.slice(open, close + 1) : "";
-    const attribute = (name) => {
-      const marker = `${name}=`;
-      const start = tag.toLowerCase().indexOf(marker.toLowerCase());
-      if (start < 0) return null;
-      const quote = tag[start + marker.length];
-      const end = tag.indexOf(quote, start + marker.length + 1);
-      return quote === '"' || quote === "'" ? tag.slice(start + marker.length + 1, end) : null;
-    };
-    return { format: "svg", width: Number.parseFloat(attribute("width")) || null, height: Number.parseFloat(attribute("height")) || null, viewBox: attribute("viewBox"), bytes: buffer.length };
-  }
-  return { format: extension.slice(1) || "unknown", width: null, height: null, bytes: buffer.length };
-}
-
 function walkKatex(value, visitor, seen = new Set()) {
   if (!value || typeof value !== "object" || seen.has(value)) return;
   seen.add(value);
@@ -156,129 +130,6 @@ function validateMath(node, issue, matrices) {
     });
   } catch (error) {
     issue("error", "latex-parse", error.message, node.position?.start.line ?? null);
-  }
-}
-
-function finiteNumber(value) {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function validateMermaidBlock(value, line, issue) {
-  const lines = value.split("\n").map((entry) => entry.trim()).filter(Boolean);
-  const directive = lines.find((entry) => !entry.startsWith("%%")) ?? "";
-  if (!directive) {
-    issue("error", "mermaid-empty", "Empty Mermaid block", line);
-    return { line, directive: null, nonempty: false };
-  }
-  const supported = /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|quadrantChart|requirementDiagram|gitGraph|mindmap|timeline|sankey-beta|xychart-beta|block-beta|packet-beta|architecture-beta|kanban|radar-beta|treemap-beta|C4\w*)\b/;
-  if (!supported.test(directive)) {
-    issue("error", "mermaid-directive", `Unrecognized Mermaid diagram directive: ${directive.slice(0, 80)}`, line);
-  }
-  return { line, directive, nonempty: true };
-}
-
-function validateExcalidrawScene(scene, sourcePath, issue) {
-  if (!scene || typeof scene !== "object" || Array.isArray(scene)) {
-    issue("error", "excalidraw-scene", `Drawing root must be an object: ${sourcePath}`);
-    return { path: sourcePath, valid: false, elements: 0 };
-  }
-  if (!Array.isArray(scene.elements)) {
-    issue("error", "excalidraw-elements", `Drawing has no elements array: ${sourcePath}`);
-    return { path: sourcePath, valid: false, elements: 0 };
-  }
-
-  const ids = new Set();
-  const elementsById = new Map();
-  const visible = [];
-  for (const element of scene.elements) {
-    if (!element || typeof element !== "object") {
-      issue("error", "excalidraw-element", `Non-object element in ${sourcePath}`);
-      continue;
-    }
-    if (typeof element.id !== "string" || !element.id) issue("error", "excalidraw-id", `Element without an id in ${sourcePath}`);
-    else if (ids.has(element.id)) issue("error", "excalidraw-id-duplicate", `Duplicate element id ${element.id} in ${sourcePath}`);
-    else {
-      ids.add(element.id);
-      elementsById.set(element.id, element);
-    }
-    if (!excalidrawTypes.has(element.type)) issue("warning", "excalidraw-type", `Unknown element type ${element.type} in ${sourcePath}`);
-    for (const field of ["x", "y", "width", "height", "angle", "opacity", "strokeWidth"]) {
-      if (!finiteNumber(element[field])) issue("error", "excalidraw-number", `${element.id ?? "element"}.${field} is not finite`, null, { path: sourcePath });
-    }
-    if (finiteNumber(element.width) && element.width < 0 || finiteNumber(element.height) && element.height < 0) issue("error", "excalidraw-size", `Negative element size in ${sourcePath}`);
-    if (finiteNumber(element.opacity) && (element.opacity < 0 || element.opacity > 100)) issue("error", "excalidraw-opacity", `Opacity outside 0–100 in ${sourcePath}`);
-    if (!Array.isArray(element.groupIds)) issue("error", "excalidraw-groups", `${element.id ?? "element"}.groupIds must be an array`, null, { path: sourcePath });
-    if (!element.isDeleted) visible.push(element);
-  }
-  if (visible.length === 0) issue("error", "excalidraw-empty", `Excalidraw has no visible elements: ${sourcePath}`);
-
-  const files = scene.files && typeof scene.files === "object" && !Array.isArray(scene.files) ? scene.files : {};
-  for (const element of scene.elements) {
-    if (!element || typeof element !== "object") continue;
-    for (const bindingName of ["startBinding", "endBinding"]) {
-      const binding = element[bindingName];
-      if (binding && !elementsById.has(binding.elementId)) issue("error", "excalidraw-binding", `${element.id}.${bindingName} targets missing element ${binding.elementId}`, null, { path: sourcePath });
-    }
-    for (const bound of element.boundElements ?? []) {
-      if (!bound?.id || !elementsById.has(bound.id)) issue("error", "excalidraw-bound-element", `${element.id} references missing bound element ${bound?.id}`, null, { path: sourcePath });
-    }
-    if (element.containerId && !elementsById.has(element.containerId)) issue("error", "excalidraw-container", `${element.id} targets missing container ${element.containerId}`, null, { path: sourcePath });
-    if (["line", "arrow", "freedraw"].includes(element.type)) {
-      if (!Array.isArray(element.points) || element.points.length < 2 || element.points.some((point) => !Array.isArray(point) || !finiteNumber(point[0]) || !finiteNumber(point[1]))) {
-        issue("error", "excalidraw-points", `${element.id} has invalid points`, null, { path: sourcePath });
-      }
-    }
-    if (element.type === "text") {
-      if (typeof element.text !== "string" || !element.text.trim()) issue("error", "excalidraw-text", `Empty text element ${element.id}`, null, { path: sourcePath });
-      if (!finiteNumber(element.fontSize) || element.fontSize <= 0) issue("error", "excalidraw-font", `Invalid font size on ${element.id}`, null, { path: sourcePath });
-    }
-    if (element.type === "image") {
-      if (typeof element.fileId !== "string" || !files[element.fileId]) issue("error", "excalidraw-image-file", `Image ${element.id} references a missing file`, null, { path: sourcePath });
-    }
-  }
-  for (const [fileId, file] of Object.entries(files)) {
-    if (!file || typeof file !== "object" || typeof file.dataURL !== "string" || !file.dataURL.startsWith("data:image/")) {
-      issue("error", "excalidraw-file-data", `Invalid embedded image file ${fileId}`, null, { path: sourcePath });
-    }
-  }
-
-  const bounds = visible.length === 0 ? null : {
-    minX: Math.min(...visible.map((element) => element.x)),
-    minY: Math.min(...visible.map((element) => element.y)),
-    maxX: Math.max(...visible.map((element) => element.x + element.width)),
-    maxY: Math.max(...visible.map((element) => element.y + element.height)),
-  };
-  return { path: sourcePath, valid: true, elements: scene.elements.length, visibleElements: visible.length, files: Object.keys(files).length, bounds };
-}
-
-function validateExcalidraw(filePath, issue) {
-  const text = readFileSync(filePath, "utf8");
-  if (!text.trim()) {
-    issue("error", "excalidraw-empty", `Empty Excalidraw file: ${filePath}`);
-    return { path: filePath, valid: false, elements: 0 };
-  }
-  try {
-    if (filePath.toLowerCase().endsWith(".excalidraw")) return validateExcalidrawScene(JSON.parse(text), filePath, issue);
-    const tree = markdownParser.parse(text);
-    const payloads = [];
-    visit(tree, (node) => {
-      if (node.type === "code" && ["json", "compressed-json"].includes((node.lang ?? "").toLowerCase())) payloads.push(node);
-    });
-    if (payloads.length !== 1) {
-      issue("error", "excalidraw-payload", `Expected exactly one drawing payload, found ${payloads.length}: ${filePath}`);
-      return { path: filePath, valid: false, elements: 0 };
-    }
-    const payload = payloads[0];
-    let decoded = payload.value;
-    if ((payload.lang ?? "").toLowerCase() === "compressed-json") {
-      const compressed = payload.value.split(/\s+/).join("");
-      decoded = LZString.decompressFromBase64(compressed) ?? LZString.decompressFromEncodedURIComponent(compressed);
-      if (!decoded) throw new Error("Compressed drawing payload could not be decoded");
-    }
-    return validateExcalidrawScene(JSON.parse(decoded), filePath, issue);
-  } catch (error) {
-    issue("error", "excalidraw-parse", `${filePath}: ${error.message}`);
-    return { path: filePath, valid: false, elements: 0 };
   }
 }
 
@@ -364,7 +215,7 @@ try {
 
   const headings = [];
   const mathNodes = [];
-  const mermaid = [];
+  const figures = [];
   let calloutCount = 0;
   let nestedCallout = false;
   let frontmatter = { present: false };
@@ -378,7 +229,7 @@ try {
     if (node.type === "heading") headings.push({ depth: node.depth, text: nodeText(node).trim(), line });
     if (node.type === "math" || node.type === "inlineMath") mathNodes.push(node);
     if (node.type === "code" && (node.lang ?? "").toLowerCase() === "mermaid") {
-      mermaid.push(validateMermaidBlock(node.value, line, issue));
+      figures.push({ kind: "mermaid", line });
     }
     if (node.type === "link" || node.type === "image") addLink(node.url, node.type === "image", line);
     if (node.type === "linkReference" || node.type === "imageReference") {
@@ -420,36 +271,31 @@ try {
 
   const matrices = [];
   for (const node of mathNodes) validateMath(node, issue, matrices);
-  const excalidraw = [];
   for (const asset of assets) {
     const lower = asset.absolute.toLowerCase();
-    if (lower.endsWith(".excalidraw") || lower.endsWith(".excalidraw.md")) excalidraw.push(validateExcalidraw(asset.absolute, issue));
-    else if (imageExtensions.has(extname(lower))) {
-      asset.metadata = imageMetadata(asset.absolute);
-      const displayedWidth = asset.width ? Number(asset.width.split("x")[0]) : null;
-      if (displayedWidth && asset.metadata.width && displayedWidth > asset.metadata.width) issue("warning", "image-upscaled", `Embed width ${displayedWidth}px exceeds raster width ${asset.metadata.width}px: ${asset.target}`, asset.line);
-      if (displayedWidth && displayedWidth > 1600) issue("warning", "embed-excessive-width", `Very wide embed: ${displayedWidth}px`, asset.line);
-    }
+    const excalidraw = lower.endsWith(".excalidraw") || lower.endsWith(".excalidraw.md");
+    if (!excalidraw && !figureExtensions.has(extname(lower))) continue;
+    const kind = excalidraw ? "excalidraw" : "image";
+    figures.push({ kind, line: asset.line, target: asset.target, resolvedPath: normalizeVaultPath(relative(vaultRoot, asset.absolute)) });
   }
 
   const errors = issues.filter((entry) => entry.severity === "error");
   const warnings = issues.filter((entry) => entry.severity === "warning");
   const report = {
-    schema: "violet-note-static-report/v2",
+    schema: "violet-note-structure-report/v3",
     vaultRoot,
     note: normalizeVaultPath(relative(vaultRoot, noteAbsolute)),
     bytes: Buffer.byteLength(text),
-    parser: { markdown: "remark-parse", gfm: "remark-gfm", math: "remark-math + KaTeX", frontmatter: "remark-frontmatter + yaml", mermaid: "static directive validation" },
-    summary: { errors: errors.length, warnings: warnings.length, links: links.length, embeds: assets.length, mathSegments: mathNodes.length, matrices: matrices.length, mermaidBlocks: mermaid.length, callouts: calloutCount, headings: headings.length },
+    parser: { markdown: "remark-parse", gfm: "remark-gfm", math: "remark-math + KaTeX", frontmatter: "remark-frontmatter + yaml" },
+    summary: { errors: errors.length, warnings: warnings.length, links: links.length, embeds: assets.length, mathSegments: mathNodes.length, matrices: matrices.length, figureReferences: figures.length, callouts: calloutCount, headings: headings.length },
     frontmatter,
     headings,
     links: links.map(({ absolute, candidates, ...entry }) => ({ ...entry, resolvedPath: absolute ? normalizeVaultPath(relative(vaultRoot, absolute)) : null, candidates: candidates?.map((candidate) => normalizeVaultPath(relative(vaultRoot, candidate))) })),
     assets: assets.map(({ absolute, candidates, ...entry }) => ({ ...entry, resolvedPath: normalizeVaultPath(relative(vaultRoot, absolute)), candidates: candidates?.map((candidate) => normalizeVaultPath(relative(vaultRoot, candidate))) })),
-    excalidraw: excalidraw.map((entry) => ({ ...entry, path: normalizeVaultPath(relative(vaultRoot, entry.path)) })),
     matrices,
-    mermaid,
+    figures,
     issues,
-    manualRequired: ["Recompute arithmetic and review semantic matrix dimensions.", "Render and inspect changed Mermaid and layout-sensitive visuals in Obsidian when available."],
+    manualRequired: ["Recompute arithmetic and review semantic matrix dimensions.", "Visually compare every figure created or regenerated during this task with its source content."],
     ok: errors.length === 0,
   };
   const rendered = `${JSON.stringify(report, null, 2)}\n`;
@@ -458,7 +304,7 @@ try {
     mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, rendered);
   }
-  process.stdout.write(`Static validation: ${report.ok ? "PASS" : "FAIL"}; ${errors.length} error(s), ${warnings.length} warning(s)\n`);
+  process.stdout.write(`Structural validation: ${report.ok ? "PASS" : "FAIL"}; ${errors.length} error(s), ${warnings.length} warning(s)\n`);
   for (const entry of issues) process.stdout.write(`${entry.severity.toUpperCase()} ${entry.code}${entry.line ? ` line ${entry.line}` : ""}: ${entry.message}\n`);
   if (args.json) process.stdout.write(`${resolve(args.json)}\n`);
   if (!report.ok) process.exit(1);

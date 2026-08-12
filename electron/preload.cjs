@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld("violet", {
     ipcRenderer.on("agent:stream", listener);
     return () => ipcRenderer.removeListener("agent:stream", listener);
   },
-  startCodexTerminal: (request, dimensions) => ipcRenderer.invoke("agent:terminal-start", { request, dimensions }),
+  startCodexTerminal: (request, dimensions, clientSessionId) => ipcRenderer.invoke("agent:terminal-start", { request, dimensions, clientSessionId }),
   sendTerminalInput: (sessionId, data) => ipcRenderer.send("agent:terminal-input", { sessionId, data }),
   resizeTerminal: (sessionId, cols, rows) => ipcRenderer.send("agent:terminal-resize", { sessionId, cols, rows }),
   interruptTerminal: (sessionId) => ipcRenderer.invoke("agent:terminal-interrupt", sessionId),

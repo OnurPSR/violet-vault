@@ -34,14 +34,4 @@ Use consistent stroke width, font family, arrowheads, corner radius, and interna
   default asset directories.
 - Use an embed width proportional to the figure's source prominence; avoid arbitrary one-size widths.
 - Do not create an embed until both the source drawing and SVG export exist.
-
-## Check the rendered figure
-
-Confirm that:
-
-- the SVG contains the complete canvas without clipping;
-- labels remain inside or attached to their intended elements;
-- mathematical notation is legible at the embedded width;
-- relative scale and reading direction match the source;
-- strokes, text, and fills remain readable in the relevant theme;
-- the editable source and exported SVG depict the same revision.
+- Embed only the rendered SVG in the note. Keep the editable Excalidraw source as an unlinked companion asset unless the user explicitly requests a source link or embed.

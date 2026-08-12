@@ -45,7 +45,6 @@ When editing or converting a renderer-specific visual, also read the applicable 
 5. When multiple independent parts are selected, process them separately in selection order. For each part, complete its visual edit first and its paragraph edit second before moving to the next part; skip any edit type not requested and do not batch parts together.
 6. Apply one minimal coherent edit. Do not mix opportunistic cleanup into the requested transformation.
 7. Re-read the modified region with its neighbors and reconcile only dependencies made stale by the edit.
-8. Hand the result to the separate note-validation workflow.
 
 ## Write-boundary rules
 

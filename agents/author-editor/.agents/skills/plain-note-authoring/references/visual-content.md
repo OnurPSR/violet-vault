@@ -8,8 +8,7 @@ Do not add a visual when prose or a short equation expresses the same meaning mo
 
 ## Compose the complete semantic unit
 
-- Include every title, caption, label, formula, legend, brace annotation, and explanation whose placement identifies a visual element.
-- Preserve relative scale, direction, alignment, containment, and reading order.
+- Apply the role contract's visual fidelity principles to the complete semantic unit.
 - Keep independent explanatory prose outside the figure and place the embed at its point in the reading flow.
 - Match the note's existing visual prominence and embed-width conventions.
 - Use the reconstruction renderer references for detailed Mermaid, Excalidraw, matrix, and spatial-formatting rules.
@@ -26,9 +25,5 @@ Do not add a visual when prose or a short equation expresses the same meaning mo
 
 - Insert the visual as a complete block at the resolved cursor or anchor boundary.
 - Do not split a paragraph, list item, table, callout, math block, or fence with an unrelated embed.
-- Keep a reconstruction source-page image at the end of its page section; insert a new explanatory visual before that image.
+- Follow `insertion-resolution.md` when placing a visual in a reconstructed page section.
 - Do not move, replace, crop, annotate, or recompress existing source images during plain authoring.
-
-## Check visual coherence
-
-Confirm that the created asset and embed represent the same revision, attached text remains attached, the rendered size is legible, and the visual does not change the meaning of neighboring content through accidental placement.

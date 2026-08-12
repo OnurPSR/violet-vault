@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { CircleStop, Command, Paperclip, X } from "lucide-react";
+import { CircleStop, Command, Eye, Paperclip, X } from "lucide-react";
 import { type DragEvent, useEffect, useRef, useState } from "react";
 import type { RunRequest, TerminalExitEvent } from "./types";
 import type { TokenUsage } from "./types";
@@ -15,9 +15,12 @@ type Props = {
   onError(error: Error): void;
   onClose(): void;
   tokenUsage?: TokenUsage | null;
+  noteName?: string;
+  noteOpen?: boolean;
+  onToggleNote?(): void;
 };
 
-export default function CodexTerminal({ request, onStarted, onData, onExit, onError, onClose, tokenUsage }: Props) {
+export default function CodexTerminal({ request, onStarted, onData, onExit, onError, onClose, tokenUsage, noteName, noteOpen, onToggleNote }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const sessionId = useRef<string | null>(null);
@@ -28,6 +31,7 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
   useEffect(() => {
     if (!host.current) return;
     let cancelled = false;
+    const clientSessionId = crypto.randomUUID();
 
     const terminal = new Terminal({
       allowProposedApi: false,
@@ -85,18 +89,19 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
       if (sessionId.current && !exited.current) window.violet.sendTerminalInput(sessionId.current, data);
     });
     const removeData = window.violet.onTerminalData((event) => {
+      if (event.clientSessionId !== clientSessionId) return;
       terminal.write(event.data);
       onData(event.data);
     });
     const removeExit = window.violet.onTerminalExit((event) => {
-      if (sessionId.current && event.sessionId !== sessionId.current) return;
+      if (event.clientSessionId !== clientSessionId) return;
       exited.current = true;
       setStatus("exited");
       onExit(event);
     });
 
     const launchTimer = window.setTimeout(() => {
-      void window.violet.startCodexTerminal(request, { cols: terminal.cols, rows: terminal.rows })
+      void window.violet.startCodexTerminal(request, { cols: terminal.cols, rows: terminal.rows }, clientSessionId)
         .then(({ sessionId: id }) => {
           if (cancelled) {
             void window.violet.closeTerminal(id);
@@ -171,6 +176,7 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
         </div>
         <div className="terminal-actions">
           <span className={`terminal-live-state ${status}`}><i />{status === "starting" ? "Starting" : status === "live" ? "Interactive" : "Session ended"}</span>
+          {noteName && onToggleNote && <button className={noteOpen ? "terminal-note-toggle active" : "terminal-note-toggle"} onClick={onToggleNote} title={`${noteOpen ? "Close" : "View"} ${noteName}`}><Eye size={14} />{noteOpen ? "Close note" : "View note"}</button>}
           <button onClick={() => void attachImages()} disabled={status !== "live"} title="Attach an image to the Codex composer"><Paperclip size={14} />Attach</button>
           <button onClick={() => void interrupt()} disabled={status !== "live"} title="Send Ctrl+C to Codex"><CircleStop size={14} />Interrupt</button>
           <button className="terminal-close" onClick={() => void close()} title="Close terminal"><X size={15} /></button>

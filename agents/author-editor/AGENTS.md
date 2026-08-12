@@ -41,27 +41,15 @@ Infer the required task mode from the user’s requested action, relevant interf
 
 Apply the following rules:
 
-- Explicit user intent takes precedence over interface state and contextual inference.
-    
-- Interface state constrains the location or scope of an operation but does not independently determine the mode.
-    
+- Explicit user intent takes precedence over interface state and contextual inference. Interface state constrains location or scope but does not independently determine the mode.
 - Images select `APPEND_RECONSTRUCTION` only when the user asks to reconstruct or add their content; otherwise, they may serve as supporting material for another mode.
 - When handwritten images and a target note are supplied without a prompt, select `APPEND_RECONSTRUCTION`.
-    
 - A selection target selects `EDIT_SELECTED_NOTE` only when the requested change
   concerns that content. Do not treat an ambiguous or rendered-only selection as
   an exact range.
-    
-- A request to add plain content at a cursor or another identifiable insertion point selects `INSERT_PLAIN_CONTENT`.
-    
-- A request to modify existing content without a relevant selection selects `EDIT_NOTE` when the intended scope can be resolved reliably.
-    
 - Review, explanation, inspection, comparison, and question-answering requests do not authorize modification unless the user also requests a change.
-    
 
 When signals conflict, prioritize the explicitly requested action, explicitly referenced content or location, relevant interface state, identified source material, and finally a unique contextual interpretation, in that order.
-
-When a request contains multiple operations, apply the relevant modes sequentially without repeating completed steps.
 
 ## Fidelity principles
 
@@ -101,7 +89,7 @@ If a required skill is unavailable, continue only when a reliable result remains
 
 Perform only the checks relevant to the changes made.
 
-Confirm that the requested content was added or edited in the intended location, unrelated content was preserved, and affected structures remain valid. Perform rendered verification only when visual correctness materially affects confidence and a suitable renderer is available.
+Confirm that the requested content was added or edited in the intended location, unrelated content was preserved, and affected structures remain valid. Every figure created or regenerated during the task must pass the note-validation skill's rendered visual comparison against its source content.
 
 Report any unresolved uncertainty or material validation limitation.
 

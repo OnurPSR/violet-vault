@@ -99,11 +99,13 @@ export type TerminalDimensions = {
 };
 
 export type TerminalDataEvent = {
+  clientSessionId: string;
   sessionId: string;
   data: string;
 };
 
 export type TerminalExitEvent = {
+  clientSessionId: string;
   sessionId: string;
   exitCode: number;
   signal?: number;
@@ -130,7 +132,7 @@ export type VioletBridge = {
   runAgent(request: RunRequest): Promise<{ output: string; provider: Exclude<ProviderId, "local">; tokenUsage: TokenUsage | null }>;
   stopAgent(): Promise<{ stopped: boolean }>;
   onAgentStream(callback: (event: AgentStreamEvent) => void): () => void;
-  startCodexTerminal(request: RunRequest, dimensions: TerminalDimensions): Promise<{ sessionId: string }>;
+  startCodexTerminal(request: RunRequest, dimensions: TerminalDimensions, clientSessionId: string): Promise<{ sessionId: string }>;
   sendTerminalInput(sessionId: string, data: string): void;
   resizeTerminal(sessionId: string, cols: number, rows: number): void;
   interruptTerminal(sessionId: string): Promise<{ interrupted: boolean }>;

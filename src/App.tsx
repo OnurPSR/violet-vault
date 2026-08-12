@@ -67,7 +67,8 @@ const SUGGESTIONS: Record<AgentId, string[]> = {
   "author-editor": ["Append these pages to the selected note", "Clarify the selected derivation", "Insert an explanation after the selected section"],
 };
 
-const MAX_TERMINAL_TRANSCRIPT_CHARS = 8 * 1024 * 1024;
+const MAX_TERMINAL_TRANSCRIPT_CHARS = 2 * 1024 * 1024;
+const TERMINAL_TRUNCATION_NOTICE = "\r\n[Earlier terminal output omitted to keep local chat history within its storage limit.]\r\n";
 const uid = () => `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 const age = (timestamp: number) => {
   const minutes = Math.max(1, Math.round((Date.now() - timestamp) / 60_000));
@@ -261,8 +262,9 @@ export default function App() {
   }
 
   function captureTerminalData(data: string) {
-    const remaining = MAX_TERMINAL_TRANSCRIPT_CHARS - terminalTranscript.current.length;
-    if (remaining > 0) terminalTranscript.current += data.slice(0, remaining);
+    const combined = `${terminalTranscript.current}${data}`;
+    if (combined.length <= MAX_TERMINAL_TRANSCRIPT_CHARS) terminalTranscript.current = combined;
+    else terminalTranscript.current = `${TERMINAL_TRUNCATION_NOTICE}${combined.slice(-(MAX_TERMINAL_TRANSCRIPT_CHARS - TERMINAL_TRUNCATION_NOTICE.length))}`;
     if (terminalSaveTimer.current === null) {
       terminalSaveTimer.current = window.setTimeout(() => persistTerminalTranscript(), 300);
     }
@@ -486,6 +488,9 @@ export default function App() {
     const usage = event.tokenUsage ?? null;
     setTerminalTokenUsage(usage);
     persistTerminalTranscript(true, usage);
+    setTerminalReplay(terminalTranscript.current || null);
+    setTerminalRequest(null);
+    setTerminalSessionId(null);
     setRunning(false);
     void refreshVaultContent().catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to refresh the edited note."));
   }
@@ -563,6 +568,14 @@ export default function App() {
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to read the selected note.");
+    }
+  }
+
+  function toggleNoteView() {
+    const opening = !noteInChat;
+    setNoteInChat(opening);
+    if (opening && terminalRequest) {
+      void refreshVaultContent().catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to refresh the selected note."));
     }
   }
 
@@ -656,17 +669,34 @@ export default function App() {
           }}
         >
           {terminalRequest ? (
-            <div className="terminal-workspace">
+            <div className={`terminal-workspace ${noteInChat && note ? "note-open" : ""}`}>
               {error && <div className="error-banner terminal-error"><span>{error}</span><button onClick={() => setError(null)}><X size={13} /></button></div>}
-              <CodexTerminal
-                request={terminalRequest}
-                onStarted={(id) => { setTerminalSessionId(id); setRunning(true); }}
-                onData={captureTerminalData}
-                onExit={terminalExited}
-                onError={terminalFailed}
-                onClose={closeTerminalView}
-                tokenUsage={terminalTokenUsage}
-              />
+              <div className="terminal-session-pane">
+                <CodexTerminal
+                  request={terminalRequest}
+                  onStarted={(id) => { setTerminalSessionId(id); setRunning(true); }}
+                  onData={captureTerminalData}
+                  onExit={terminalExited}
+                  onError={terminalFailed}
+                  onClose={closeTerminalView}
+                  tokenUsage={terminalTokenUsage}
+                  noteName={note?.name}
+                  noteOpen={noteInChat}
+                  onToggleNote={note ? toggleNoteView : undefined}
+                />
+              </div>
+              {noteInChat && note && (
+                <article className="terminal-note-pane">
+                  <header>
+                    <div><FileText size={16} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>
+                    <button onClick={toggleNoteView} title="Close note view" aria-label="Close note view"><X size={15} /></button>
+                  </header>
+                  <div className="terminal-note-content">
+                    <RichMessage content={note.content ?? ""} vaultPath={vaultPath} assetRevision={noteRevision} />
+                  </div>
+                  <footer>Read-only preview during this terminal session.</footer>
+                </article>
+              )}
             </div>
           ) : terminalReplay ? (
             <div className="terminal-workspace"><CodexTranscript transcript={terminalReplay} tokenUsage={terminalTokenUsage} /></div>
@@ -737,7 +767,7 @@ export default function App() {
               <textarea value={prompt} disabled={running} onChange={(event) => setPrompt(event.target.value)} onKeyDown={key} placeholder={`Message ${agent.name}…`} rows={3} />
               <div className="composer-tools">
                 <div><button className="composer-button" onClick={() => void attachImages()} disabled={running} title="Attach images"><Paperclip size={17} /></button>{note && <span className="context-pill"><FileText size={13} />{note.name}<button onClick={() => { setNote(null); setNoteInChat(false); setSelectedText(""); setSelectedFigure(null); }}><X size={12} /></button></span>}</div>
-                <div className="send-area"><span>↵ Send · ⇧↵ New line</span>{running ? <button className="send-button stop" onClick={() => void stop()} title="Stop agent"><CircleStop size={17} /></button> : <button className="send-button" onClick={() => void send()} disabled={editing ? !prompt.trim() : !canSend} title={canSend || editing ? "Send" : "Select a vault and install the selected CLI"}><Send size={17} /></button>}</div>
+                <div className="send-area">{running ? <button className="send-button stop" onClick={() => void stop()} title="Stop agent"><CircleStop size={17} /></button> : <button className="send-button" onClick={() => void send()} disabled={editing ? !prompt.trim() : !canSend} title={canSend || editing ? "Send" : "Select a vault and install the selected CLI"}><Send size={17} /></button>}</div>
               </div>
             </div>
             <p className="composer-hint">{agentId === "retriever" ? "Retriever starts in read-only mode." : "Writes start vault-scoped; Codex will surface any approval it needs inside the terminal."}</p>
@@ -770,7 +800,7 @@ export default function App() {
         </div>
         <div className="selected-context">
           <div className="section-label"><span>SELECTED NOTE</span><ChevronDown size={14} /></div>
-          {note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div><p>{note.content?.slice(0, 220).replace(/[#*`>-]/g, " ") || "Note selected as model context."}</p>{agentId === "author-editor" && <button className="view-note-button" onClick={() => setNoteInChat(true)}><Eye size={14} />{noteInChat ? "Note open in chat" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}
+          {note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div><p>{note.content?.slice(0, 220).replace(/[#*`>-]/g, " ") || "Note selected as model context."}</p>{agentId === "author-editor" && <button className="view-note-button" onClick={toggleNoteView}><Eye size={14} />{noteInChat ? "Close note" : terminalRequest ? "View beside terminal" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}
         </div>
       </aside>
     </main>
