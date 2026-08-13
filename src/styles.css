@@ -731,89 +731,75 @@ body.panel-resizing {
   border-color: rgba(151, 126, 236, 0.18);
 }
 
-.agent-title {
-  display: flex;
-  min-width: 150px;
-  flex: 1 1 260px;
-  align-items: center;
-  gap: 11px;
-}
-
-.title-icon {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  flex: none;
-  border: 1px solid rgba(154, 128, 255, 0.2);
-  border-radius: 11px;
-  background: rgba(132, 99, 236, 0.11);
-  color: #b5a1ff;
-}
-
-.agent-title > div {
-  min-width: 0;
-}
-
-.agent-title strong,
-.agent-title small {
-  display: block;
-}
-
-.agent-title strong {
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.agent-title small {
-  max-width: 300px;
-  margin-top: 4px;
-  overflow: hidden;
-  color: #847d89;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .model-controls {
   display: flex;
+  width: min(440px, calc(100% - 100px));
   min-width: 0;
-  flex: 0 1 auto;
+  margin-left: auto;
   align-items: center;
-  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .select-control {
   position: relative;
-  display: flex;
-  align-items: center;
-  height: 48px;
   min-width: 0;
+}
+
+.select-control + .select-control::before {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+  width: 1px;
+  background: var(--line);
+  content: "";
+}
+
+.select-trigger {
+  display: flex;
+  width: 100%;
+  height: 46px;
+  min-width: 0;
+  align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.035);
-  color: #88818f;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #817a88;
   cursor: pointer;
-  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  text-align: left;
+  transition: background 150ms ease, color 150ms ease;
 }
 
-.select-control:hover {
-  border-color: var(--line-strong);
-  background: rgba(255, 255, 255, 0.055);
+.select-trigger:hover {
+  background: rgba(255, 255, 255, 0.045);
+  color: #a49dab;
 }
 
-.select-control:focus-within {
-  border-color: rgba(162, 138, 255, 0.68);
-  background: rgba(148, 120, 255, 0.09);
-  box-shadow: var(--focus);
+.select-trigger:focus-visible,
+.select-control.open .select-trigger {
+  outline: none;
+  background: rgba(148, 120, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(162, 138, 255, 0.22);
   color: var(--purple-soft);
 }
 
-.select-control > svg {
+.select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.select-trigger > svg {
   flex: none;
   pointer-events: none;
+  transition: transform 150ms ease;
+}
+
+.select-control.open .select-trigger > svg {
+  transform: rotate(180deg);
 }
 
 .select-copy {
@@ -835,48 +821,87 @@ body.panel-resizing {
   text-transform: uppercase;
 }
 
-.select-control:focus-within .select-copy small {
+.select-control.open .select-copy small,
+.select-trigger:focus-visible .select-copy small {
   color: #a996ee;
 }
 
-.select-control select {
-  width: 100%;
-  min-width: 0;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  appearance: none;
-  background: transparent;
+.select-copy strong {
+  display: block;
+  overflow: hidden;
   color: #d4ced8;
-  cursor: pointer;
   font-size: 12px;
   font-weight: 580;
-  line-height: 20px;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.select-control select:focus-visible {
-  box-shadow: none;
+.select-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: max(100%, 168px);
+  padding: 5px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 11px;
+  background: rgba(24, 20, 29, 0.98);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), 0 1px rgba(255, 255, 255, 0.04) inset;
+  backdrop-filter: blur(18px);
 }
 
-.select-control option {
+.select-option {
+  display: flex;
+  width: 100%;
   min-height: 34px;
-  padding: 8px 10px;
-  background: #1b1720;
-  color: #f5f2f8;
-  font-size: 13px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #aaa3af;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.select-option:hover,
+.select-option:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text);
+}
+
+.select-option[aria-selected="true"] {
+  background: rgba(148, 120, 255, 0.1);
+  color: #d1c6ff;
+}
+
+.select-option svg {
+  visibility: hidden;
+  flex: none;
+  color: #a98eff;
+}
+
+.select-option[aria-selected="true"] svg {
+  visibility: visible;
 }
 
 .provider-select {
-  width: 160px;
+  flex: 1 1 0;
 }
 
 .model-select {
-  width: 150px;
+  flex: 1.25 1 0;
 }
 
 .effort-select {
-  width: 144px;
+  flex: 0.9 1 0;
 }
 
 .chat-scroll {
@@ -2086,24 +2111,8 @@ body.panel-resizing {
 }
 
 @media (max-width: 1080px) {
-  .agent-title small {
-    display: none;
-  }
-
   .topbar {
     padding-right: 16px;
-  }
-
-  .provider-select {
-    width: 150px;
-  }
-
-  .model-select {
-    width: 142px;
-  }
-
-  .effort-select {
-    width: 134px;
   }
 }
 
@@ -2169,23 +2178,15 @@ body.panel-resizing {
     grid-template-rows: 70px minmax(0, 1fr) auto;
   }
 
-  .agent-title {
-    flex: 1 1 auto;
-  }
-
-  .agent-title strong {
-    max-width: 130px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .title-icon {
-    width: 38px;
-    height: 38px;
+  .model-controls {
+    width: min(300px, calc(100% - 52px));
   }
 
   .provider-select {
+    display: none;
+  }
+
+  .model-select::before {
     display: none;
   }
 
@@ -2198,11 +2199,11 @@ body.panel-resizing {
   }
 
   .model-select {
-    width: 126px;
+    flex: 1.2 1 0;
   }
 
   .effort-select {
-    width: 122px;
+    flex: 1 1 0;
   }
 
   .chat-scroll {
@@ -2224,17 +2225,17 @@ body.panel-resizing {
 }
 
 @media (max-width: 520px) {
-  .agent-title .title-icon,
   .effort-select {
     display: none;
   }
 
   .model-controls {
+    width: 170px;
     margin-left: auto;
   }
 
   .model-select {
-    width: 122px;
+    flex: 1;
   }
 
   .empty-state > p:not(.micro-label) {

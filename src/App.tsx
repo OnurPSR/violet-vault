@@ -1,6 +1,5 @@
 import {
-  Bot,
-  BrainCircuit,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -132,6 +131,107 @@ const age = (timestamp: number) => {
 
 function validModel(provider: ProviderId, model: string) {
   return PROVIDERS[provider].models.some((item) => item.value === model) ? model : PROVIDERS[provider].models[0].value;
+}
+
+type SelectMenuProps = {
+  label: string;
+  value: string;
+  options: ModelOption[];
+  className: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+};
+
+function SelectMenu({ label, value, options, className, disabled = false, onChange }: SelectMenuProps) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    function dismiss(event: globalThis.PointerEvent) {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      trigger.current?.focus();
+    }
+    document.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", closeOnEscape);
+    requestAnimationFrame(() => root.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus());
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  function moveFocus(event: KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const items = Array.from(root.current?.querySelectorAll<HTMLButtonElement>(".select-option") ?? []);
+    if (!items.length) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : event.key === "ArrowDown" ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
+    items[next].focus();
+  }
+
+  function choose(value: string) {
+    onChange(value);
+    setOpen(false);
+    trigger.current?.focus();
+  }
+
+  return (
+    <div className={`select-control ${className} ${open ? "open" : ""}`} ref={root} onKeyDown={moveFocus}>
+      <button
+        ref={trigger}
+        type="button"
+        className="select-trigger"
+        aria-label={label === "Reasoning" ? "Reasoning effort" : label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
+        <span className="select-copy"><small>{label}</small><strong>{selected?.label}</strong></span>
+        <ChevronDown size={13} />
+      </button>
+      {open && (
+        <div className="select-menu" role="listbox" aria-label={`${label} options`}>
+          {options.map((option) => (
+            <button
+              type="button"
+              className="select-option"
+              role="option"
+              aria-selected={option.value === value}
+              key={option.value}
+              onClick={() => choose(option.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                choose(option.value);
+              }}
+            >
+              <span>{option.label}</span>
+              <Check size={14} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function App() {
@@ -815,22 +915,10 @@ export default function App() {
           <button className="icon-button panel-toggle left-panel-toggle" onClick={() => setLeftPanelOpen((open) => !open)} title={`${leftPanelOpen ? "Hide" : "Show"} primary sidebar`} aria-label={`${leftPanelOpen ? "Hide" : "Show"} primary sidebar`}>
             {leftPanelOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
           </button>
-          <div className="agent-title"><span className="title-icon"><AgentIcon size={18} /></span><div><strong>{agent.name}</strong><small>{agent.text}</small></div></div>
           <div className="model-controls" aria-label="Model settings">
-            <label className="select-control provider-select">
-              <Bot size={17} />
-              <span className="select-copy"><small>Provider</small><select aria-label="Provider" value={provider} disabled={sessionLocked} onChange={(event) => chooseProvider(event.target.value as ProviderId)}>{Object.entries(PROVIDERS).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}</select></span>
-              <ChevronDown size={14} />
-            </label>
-            <label className="select-control model-select">
-              <span className="select-copy"><small>Model</small><select aria-label="Model" value={model} disabled={sessionLocked || provider === "local"} onChange={(event) => setModel(event.target.value)}>{PROVIDERS[provider].models.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></span>
-              <ChevronDown size={14} />
-            </label>
-            <label className="select-control effort-select">
-              <BrainCircuit size={17} />
-              <span className="select-copy"><small>Reasoning</small><select aria-label="Reasoning effort" value={effort} disabled={sessionLocked || provider === "local"} onChange={(event) => setEffort(event.target.value as Effort)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></span>
-              <ChevronDown size={14} />
-            </label>
+            <SelectMenu label="Provider" className="provider-select" value={provider} disabled={sessionLocked} options={Object.entries(PROVIDERS).map(([value, item]) => ({ value, label: item.label }))} onChange={(value) => chooseProvider(value as ProviderId)} />
+            <SelectMenu label="Model" className="model-select" value={model} disabled={sessionLocked || provider === "local"} options={PROVIDERS[provider].models} onChange={setModel} />
+            <SelectMenu label="Reasoning" className="effort-select" value={effort} disabled={sessionLocked || provider === "local"} options={[{ value: "high", label: "High" }, { value: "medium", label: "Medium" }, { value: "low", label: "Low" }]} onChange={(value) => setEffort(value as Effort)} />
           </div>
           <button className="icon-button panel-toggle right-panel-toggle" onClick={() => setRightPanelOpen((open) => !open)} title={`${rightPanelOpen ? "Hide" : "Show"} context sidebar`} aria-label={`${rightPanelOpen ? "Hide" : "Show"} context sidebar`}>
             {rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
