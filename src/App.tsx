@@ -13,6 +13,10 @@ import {
   Eye,
   Library,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Paperclip,
   Pencil,
   Plus,
@@ -23,7 +27,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { CSSProperties, DragEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import CodexTerminal from "./CodexTerminal";
 import CodexTranscript from "./CodexTranscript";
 import RichMessage from "./RichMessage";
@@ -69,6 +73,57 @@ const SUGGESTIONS: Record<AgentId, string[]> = {
 
 const MAX_TERMINAL_TRANSCRIPT_CHARS = 2 * 1024 * 1024;
 const TERMINAL_TRUNCATION_NOTICE = "\r\n[Earlier terminal output omitted to keep local chat history within its storage limit.]\r\n";
+const STREAM_RENDER_INTERVAL_MS = 50;
+const TERMINAL_PERSIST_INTERVAL_MS = 5_000;
+const LEFT_PANEL_MIN_WIDTH = 220;
+const LEFT_PANEL_MAX_WIDTH = 420;
+const RIGHT_PANEL_MIN_WIDTH = 260;
+const RIGHT_PANEL_MAX_WIDTH = 480;
+const MIN_CHAT_WIDTH = 420;
+
+type TerminalTranscriptBuffer = {
+  chunks: string[];
+  head: number;
+  headOffset: number;
+  length: number;
+  truncated: boolean;
+};
+
+function createTerminalTranscriptBuffer(): TerminalTranscriptBuffer {
+  return { chunks: [], head: 0, headOffset: 0, length: 0, truncated: false };
+}
+
+function appendTerminalTranscript(buffer: TerminalTranscriptBuffer, data: string) {
+  if (!data) return;
+  buffer.chunks.push(data);
+  buffer.length += data.length;
+  const payloadLimit = MAX_TERMINAL_TRANSCRIPT_CHARS - TERMINAL_TRUNCATION_NOTICE.length;
+
+  while (buffer.length > payloadLimit && buffer.head < buffer.chunks.length) {
+    const chunk = buffer.chunks[buffer.head];
+    const available = chunk.length - buffer.headOffset;
+    const removed = Math.min(buffer.length - payloadLimit, available);
+    buffer.headOffset += removed;
+    buffer.length -= removed;
+    buffer.truncated = true;
+    if (buffer.headOffset === chunk.length) {
+      buffer.head += 1;
+      buffer.headOffset = 0;
+    }
+  }
+
+  if (buffer.head > 1_024 && buffer.head * 2 > buffer.chunks.length) {
+    buffer.chunks = buffer.chunks.slice(buffer.head);
+    buffer.head = 0;
+  }
+}
+
+function terminalTranscriptText(buffer: TerminalTranscriptBuffer) {
+  const chunks = buffer.chunks.slice(buffer.head);
+  if (chunks.length > 0 && buffer.headOffset > 0) chunks[0] = chunks[0].slice(buffer.headOffset);
+  return `${buffer.truncated ? TERMINAL_TRUNCATION_NOTICE : ""}${chunks.join("")}`;
+}
+
 const uid = () => `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 const age = (timestamp: number) => {
   const minutes = Math.max(1, Math.round((Date.now() - timestamp) / 60_000));
@@ -109,13 +164,18 @@ export default function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [leftPanelOpen, setLeftPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(292);
+  const [rightPanelWidth, setRightPanelWidth] = useState(328);
+  const [selectedContextOpen, setSelectedContextOpen] = useState(true);
   const [ready, setReady] = useState(false);
   const [cliStatus, setCliStatus] = useState<CliStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
-  const terminalTranscript = useRef("");
+  const terminalTranscript = useRef<TerminalTranscriptBuffer>(createTerminalTranscriptBuffer());
   const terminalChatId = useRef<string | null>(null);
   const terminalSaveTimer = useRef<number | null>(null);
   const agent = AGENTS.find((item) => item.id === agentId) ?? AGENTS[0];
@@ -205,11 +265,19 @@ export default function App() {
     const area = scrollArea.current;
     const content = area?.firstElementChild;
     if (!area || !content) return;
+    let frame: number | null = null;
     const observer = new ResizeObserver(() => {
-      if (stickToBottom.current) area.scrollTo({ top: area.scrollHeight, behavior: "auto" });
+      if (!stickToBottom.current || frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        if (stickToBottom.current) area.scrollTo({ top: area.scrollHeight, behavior: "auto" });
+      });
     });
     observer.observe(content);
-    return () => observer.disconnect();
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [chatId, messages.length === 0, terminalRequest, terminalReplay]);
 
   useEffect(() => {
@@ -221,7 +289,8 @@ export default function App() {
       }
       if (modifier && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        searchInput.current?.focus();
+        setRightPanelOpen(true);
+        requestAnimationFrame(() => searchInput.current?.focus());
       }
     }
     window.addEventListener("keydown", shortcut);
@@ -255,18 +324,16 @@ export default function App() {
     }
     const id = terminalChatId.current;
     if (!id) return;
-    const transcript = terminalTranscript.current;
+    const transcript = terminalTranscriptText(terminalTranscript.current);
     setChats((all) => all.map((chat) => chat.id === id
       ? { ...chat, terminalTranscript: transcript, terminalTokenUsage: usage, updatedAt: markUpdated ? Date.now() : chat.updatedAt }
       : chat));
   }
 
   function captureTerminalData(data: string) {
-    const combined = `${terminalTranscript.current}${data}`;
-    if (combined.length <= MAX_TERMINAL_TRANSCRIPT_CHARS) terminalTranscript.current = combined;
-    else terminalTranscript.current = `${TERMINAL_TRUNCATION_NOTICE}${combined.slice(-(MAX_TERMINAL_TRANSCRIPT_CHARS - TERMINAL_TRUNCATION_NOTICE.length))}`;
+    appendTerminalTranscript(terminalTranscript.current, data);
     if (terminalSaveTimer.current === null) {
-      terminalSaveTimer.current = window.setTimeout(() => persistTerminalTranscript(), 300);
+      terminalSaveTimer.current = window.setTimeout(() => persistTerminalTranscript(), TERMINAL_PERSIST_INTERVAL_MS);
     }
   }
 
@@ -296,7 +363,7 @@ export default function App() {
     setMessages([]);
     setTerminalReplay(null);
     setTerminalTokenUsage(null);
-    terminalTranscript.current = "";
+    terminalTranscript.current = createTerminalTranscriptBuffer();
     terminalChatId.current = null;
     setPrompt("");
     setImages([]);
@@ -392,7 +459,7 @@ export default function App() {
       const userMessage: Message = { id: uid(), role: "user", content: text || "Reconstruct attached handwritten pages", createdAt: Date.now() };
       const staged = [...messages, userMessage];
       terminalChatId.current = runChatId;
-      terminalTranscript.current = "";
+      terminalTranscript.current = createTerminalTranscriptBuffer();
       setTerminalTokenUsage(null);
       setTerminalReplay(null);
       setMessages(staged);
@@ -432,19 +499,60 @@ export default function App() {
     setError(null);
 
     let activeStreamItem: string | null = null;
+    let renderedStreamContent = "";
+    let replacementStreamContent: string | null = null;
+    let pendingStreamDeltas: string[] = [];
+    let streamRenderTimer: number | null = null;
+    let streamClosed = false;
+
+    const renderPendingStream = () => {
+      streamRenderTimer = null;
+      if (replacementStreamContent !== null) {
+        renderedStreamContent = replacementStreamContent;
+        replacementStreamContent = null;
+        pendingStreamDeltas = [];
+      } else if (pendingStreamDeltas.length > 0) {
+        renderedStreamContent += pendingStreamDeltas.join("");
+        pendingStreamDeltas = [];
+      } else {
+        return;
+      }
+      const content = renderedStreamContent;
+      setMessages((current) => current.map((message) => message.id === assistantMessage.id ? { ...message, content } : message));
+    };
+
+    const scheduleStreamRender = () => {
+      if (streamRenderTimer === null) streamRenderTimer = window.setTimeout(renderPendingStream, STREAM_RENDER_INTERVAL_MS);
+    };
+
     const removeStream = window.violet.onAgentStream((event) => {
-      setMessages((current) => current.map((message) => {
-        if (message.id !== assistantMessage.id) return message;
-        if (event.content !== undefined) {
-          activeStreamItem = event.itemId;
-          return { ...message, content: event.content };
-        }
-        if (event.delta === undefined) return message;
-        const content = activeStreamItem === event.itemId ? `${message.content}${event.delta}` : event.delta;
+      if (event.content !== undefined) {
         activeStreamItem = event.itemId;
-        return { ...message, content };
-      }));
+        replacementStreamContent = event.content;
+        pendingStreamDeltas = [];
+        scheduleStreamRender();
+        return;
+      }
+      if (event.delta === undefined) return;
+      if (activeStreamItem !== event.itemId) {
+        activeStreamItem = event.itemId;
+        renderedStreamContent = "";
+        replacementStreamContent = null;
+        pendingStreamDeltas = [];
+      }
+      pendingStreamDeltas.push(event.delta);
+      scheduleStreamRender();
     });
+
+    const closeStream = () => {
+      if (streamClosed) return;
+      streamClosed = true;
+      removeStream();
+      if (streamRenderTimer !== null) {
+        window.clearTimeout(streamRenderTimer);
+        streamRenderTimer = null;
+      }
+    };
 
     try {
       const result = await window.violet.runAgent({
@@ -459,6 +567,7 @@ export default function App() {
         images: currentImages,
         editContext,
       });
+      closeStream();
       const completed = staged.map((message) => message.id === assistantMessage.id
         ? { ...message, content: result.output, tokenUsage: result.tokenUsage ?? null }
         : message);
@@ -469,12 +578,13 @@ export default function App() {
       setSelectedFigure(null);
       await refreshVaultContent();
     } catch (cause) {
+      closeStream();
       const failed = staged.filter((message) => message.id !== assistantMessage.id);
       setMessages(failed);
       upsertConversation(failed, failed.find((message) => message.role === "user")?.content ?? text, runChatId);
       setError(cause instanceof Error ? cause.message : "The agent run failed.");
     } finally {
-      removeStream();
+      closeStream();
       setRunning(false);
     }
   }
@@ -488,7 +598,7 @@ export default function App() {
     const usage = event.tokenUsage ?? null;
     setTerminalTokenUsage(usage);
     persistTerminalTranscript(true, usage);
-    setTerminalReplay(terminalTranscript.current || null);
+    setTerminalReplay(terminalTranscriptText(terminalTranscript.current) || null);
     setTerminalRequest(null);
     setTerminalSessionId(null);
     setRunning(false);
@@ -503,7 +613,7 @@ export default function App() {
 
   function closeTerminalView() {
     persistTerminalTranscript(true);
-    setTerminalReplay(terminalTranscript.current || null);
+    setTerminalReplay(terminalTranscriptText(terminalTranscript.current) || null);
     setTerminalRequest(null);
     setTerminalSessionId(null);
     setRunning(false);
@@ -562,6 +672,7 @@ export default function App() {
     try {
       const result = await window.violet.readNote(vaultPath, selected.path);
       setNote({ ...selected, content: result.content });
+      setSelectedContextOpen(true);
       setNoteInChat(false);
       setSelectedText("");
       setSelectedFigure(null);
@@ -572,19 +683,63 @@ export default function App() {
   }
 
   function toggleNoteView() {
-    const opening = !noteInChat;
-    setNoteInChat(opening);
-    if (opening && terminalRequest) {
-      void refreshVaultContent().catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to refresh the selected note."));
+    setNoteInChat((open) => !open);
+  }
+
+  function startPanelResize(side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    document.body.classList.add("panel-resizing");
+    let frame: number | null = null;
+    let pendingWidth = side === "left" ? leftPanelWidth : rightPanelWidth;
+
+    const commit = () => {
+      frame = null;
+      if (side === "left") setLeftPanelWidth(pendingWidth);
+      else setRightPanelWidth(pendingWidth);
+    };
+    const move = (moveEvent: globalThis.PointerEvent) => {
+      const oppositeWidth = side === "left"
+        ? (rightPanelOpen ? rightPanelWidth : 0)
+        : (leftPanelOpen ? leftPanelWidth : 0);
+      const maximumFromViewport = Math.max(
+        side === "left" ? LEFT_PANEL_MIN_WIDTH : RIGHT_PANEL_MIN_WIDTH,
+        window.innerWidth - oppositeWidth - MIN_CHAT_WIDTH - 10,
+      );
+      const requested = side === "left" ? moveEvent.clientX : window.innerWidth - moveEvent.clientX;
+      const minimum = side === "left" ? LEFT_PANEL_MIN_WIDTH : RIGHT_PANEL_MIN_WIDTH;
+      const maximum = Math.min(side === "left" ? LEFT_PANEL_MAX_WIDTH : RIGHT_PANEL_MAX_WIDTH, maximumFromViewport);
+      pendingWidth = Math.min(maximum, Math.max(minimum, requested));
+      if (frame === null) frame = requestAnimationFrame(commit);
+    };
+    const stop = () => {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+        commit();
+      }
+      document.body.classList.remove("panel-resizing");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  }
+
+  function resizePanelFromKeyboard(side: "left" | "right", event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    if (side === "left") {
+      setLeftPanelWidth((width) => Math.min(LEFT_PANEL_MAX_WIDTH, Math.max(LEFT_PANEL_MIN_WIDTH, width + direction * 12)));
+    } else {
+      setRightPanelWidth((width) => Math.min(RIGHT_PANEL_MAX_WIDTH, Math.max(RIGHT_PANEL_MIN_WIDTH, width - direction * 12)));
     }
   }
 
   const activeCli = provider === "local" ? null : cliStatus?.[provider];
-  const bridgeText = provider === "local"
-    ? "Display only"
-    : activeCli?.installed
-      ? activeCli.version ?? `${PROVIDERS[provider].label} ready`
-      : `${PROVIDERS[provider].label} not found`;
   const canSend = Boolean(
     (prompt.trim() || (agentId === "author-editor" && images.length > 0 && note))
     && vaultPath
@@ -592,12 +747,18 @@ export default function App() {
     && activeCli?.installed,
   );
   const sessionLocked = running || Boolean(terminalRequest) || Boolean(terminalReplay);
+  const layoutStyle = {
+    "--left-panel-width": leftPanelOpen ? `${leftPanelWidth}px` : "0px",
+    "--left-resizer-width": leftPanelOpen ? "5px" : "0px",
+    "--right-panel-width": rightPanelOpen ? `${rightPanelWidth}px` : "0px",
+    "--right-resizer-width": rightPanelOpen ? "5px" : "0px",
+  } as CSSProperties;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${leftPanelOpen ? "" : "left-panel-hidden"} ${rightPanelOpen ? "" : "right-panel-hidden"}`} style={layoutStyle}>
       <aside className={`agent-sidebar ${menu ? "mobile-open" : ""}`}>
         <div className="sidebar-heading">
-          <div><span className="micro-label">LOCAL WORKSPACE</span><h1>Violet Vault</h1></div>
+          <div><h1>Violet Vault</h1></div>
           <button className="icon-button mobile-close" onClick={() => setMenu(false)}><X size={18} /></button>
         </div>
         <button className="new-chat-button" onClick={() => void fresh()}><Plus size={17} />New conversation<span>Ctrl N</span></button>
@@ -632,15 +793,28 @@ export default function App() {
             ))}
           </div>
         </section>
-        <div className="sidebar-footer">
-          <span className={`status-dot ${running ? "running" : activeCli?.installed ? "connected" : ""}`} />
-          <div><strong>{running ? "Agent running" : "Local bridge"}</strong><small>{running ? `${agent.name} · ${PROVIDERS[provider].label}` : bridgeText}</small></div>
-        </div>
       </aside>
+
+      <div
+        className="panel-resizer left-resizer"
+        role="separator"
+        aria-label="Resize primary sidebar"
+        aria-orientation="vertical"
+        aria-valuemin={LEFT_PANEL_MIN_WIDTH}
+        aria-valuemax={LEFT_PANEL_MAX_WIDTH}
+        aria-valuenow={leftPanelWidth}
+        tabIndex={leftPanelOpen ? 0 : -1}
+        onPointerDown={(event) => startPanelResize("left", event)}
+        onKeyDown={(event) => resizePanelFromKeyboard("left", event)}
+        onDoubleClick={() => setLeftPanelWidth(292)}
+      />
 
       <section className="chat-workspace">
         <header className="topbar">
           <button className="icon-button mobile-menu" onClick={() => setMenu(true)}><Menu size={19} /></button>
+          <button className="icon-button panel-toggle left-panel-toggle" onClick={() => setLeftPanelOpen((open) => !open)} title={`${leftPanelOpen ? "Hide" : "Show"} primary sidebar`} aria-label={`${leftPanelOpen ? "Hide" : "Show"} primary sidebar`}>
+            {leftPanelOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          </button>
           <div className="agent-title"><span className="title-icon"><AgentIcon size={18} /></span><div><strong>{agent.name}</strong><small>{agent.text}</small></div></div>
           <div className="model-controls" aria-label="Model settings">
             <label className="select-control provider-select">
@@ -658,6 +832,9 @@ export default function App() {
               <ChevronDown size={14} />
             </label>
           </div>
+          <button className="icon-button panel-toggle right-panel-toggle" onClick={() => setRightPanelOpen((open) => !open)} title={`${rightPanelOpen ? "Hide" : "Show"} context sidebar`} aria-label={`${rightPanelOpen ? "Hide" : "Show"} context sidebar`}>
+            {rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+          </button>
         </header>
 
         <div
@@ -669,7 +846,7 @@ export default function App() {
           }}
         >
           {terminalRequest ? (
-            <div className={`terminal-workspace ${noteInChat && note ? "note-open" : ""}`}>
+            <div className="terminal-workspace">
               {error && <div className="error-banner terminal-error"><span>{error}</span><button onClick={() => setError(null)}><X size={13} /></button></div>}
               <div className="terminal-session-pane">
                 <CodexTerminal
@@ -679,24 +856,8 @@ export default function App() {
                   onExit={terminalExited}
                   onError={terminalFailed}
                   onClose={closeTerminalView}
-                  tokenUsage={terminalTokenUsage}
-                  noteName={note?.name}
-                  noteOpen={noteInChat}
-                  onToggleNote={note ? toggleNoteView : undefined}
                 />
               </div>
-              {noteInChat && note && (
-                <article className="terminal-note-pane">
-                  <header>
-                    <div><FileText size={16} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>
-                    <button onClick={toggleNoteView} title="Close note view" aria-label="Close note view"><X size={15} /></button>
-                  </header>
-                  <div className="terminal-note-content">
-                    <RichMessage content={note.content ?? ""} vaultPath={vaultPath} assetRevision={noteRevision} />
-                  </div>
-                  <footer>Read-only preview during this terminal session.</footer>
-                </article>
-              )}
             </div>
           ) : terminalReplay ? (
             <div className="terminal-workspace"><CodexTranscript transcript={terminalReplay} tokenUsage={terminalTokenUsage} /></div>
@@ -754,7 +915,7 @@ export default function App() {
               {editing && <div className="editing-banner"><Pencil size={13} />Editing stored question<button onClick={() => { setEditing(null); setPrompt(""); }}><X size={13} /></button></div>}
               {agentId === "author-editor" && note && (
                 <div className="edit-target-tray">
-                  <div className="edit-target-heading"><Pencil size={13} /><strong>Edit target</strong><span>{selectedText || selectedFigure ? "Scoped selection" : "Scope from request"}</span></div>
+                  <div className="edit-target-heading"><Pencil size={13} /><strong>Edit target</strong>{(selectedText || selectedFigure) && <span>Scoped selection</span>}</div>
                   <div className="edit-target-items">
                     <span className="edit-target-note"><FileText size={14} /><span><strong>{note.name}</strong><small>Selected note</small></span></span>
                     {selectedText && <span className="edit-target-text"><span>“{selectedText.replace(/\s+/g, " ").slice(0, 100)}{selectedText.length > 100 ? "…" : ""}”</span><button onClick={() => setSelectedText("")} aria-label="Remove selected text"><X size={12} /></button></span>}
@@ -774,6 +935,20 @@ export default function App() {
           </div>
         )}
       </section>
+
+      <div
+        className="panel-resizer right-resizer"
+        role="separator"
+        aria-label="Resize context sidebar"
+        aria-orientation="vertical"
+        aria-valuemin={RIGHT_PANEL_MIN_WIDTH}
+        aria-valuemax={RIGHT_PANEL_MAX_WIDTH}
+        aria-valuenow={rightPanelWidth}
+        tabIndex={rightPanelOpen ? 0 : -1}
+        onPointerDown={(event) => startPanelResize("right", event)}
+        onKeyDown={(event) => resizePanelFromKeyboard("right", event)}
+        onDoubleClick={() => setRightPanelWidth(328)}
+      />
 
       <aside className="context-panel">
         <div className="context-heading"><div><span className="micro-label">CONTEXT</span><h2>Obsidian Vault</h2></div></div>
@@ -798,9 +973,11 @@ export default function App() {
             <><div className="browser-summary"><span>{folderView.folders.length} folders</span><span>{folderView.notes.length} notes</span></div><div className="note-list">{folderView.folders.map((folder) => <button key={folder.path} className="folder-row" disabled={sessionLocked} onClick={() => navigateFolder(folder.path)}><Folder size={16} /><span><strong>{folder.name}</strong><small>{folder.noteCount} {folder.noteCount === 1 ? "note" : "notes"}</small></span><ChevronRight size={14} /></button>)}{folderView.notes.map((item) => <button key={item.path} disabled={sessionLocked} className={note?.path === item.path ? "active" : ""} onClick={() => void openNote(item)}><FileText size={15} /><span><strong>{item.name}</strong><small>Markdown note</small></span></button>)}</div>{folderView.folders.length === 0 && folderView.notes.length === 0 && <div className="folder-empty"><Folder size={24} /><strong>Empty folder</strong><p>No Markdown notes are available here.</p></div>}</>
           )}
         </div>
-        <div className="selected-context">
-          <div className="section-label"><span>SELECTED NOTE</span><ChevronDown size={14} /></div>
-          {note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div><p>{note.content?.slice(0, 220).replace(/[#*`>-]/g, " ") || "Note selected as model context."}</p>{agentId === "author-editor" && <button className="view-note-button" onClick={toggleNoteView}><Eye size={14} />{noteInChat ? "Close note" : terminalRequest ? "View beside terminal" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}
+        <div className={`selected-context ${selectedContextOpen ? "" : "collapsed"}`}>
+          <button className="section-label selected-context-toggle" onClick={() => setSelectedContextOpen((open) => !open)} aria-expanded={selectedContextOpen} aria-controls="selected-note-content">
+            <span>SELECTED NOTE</span><ChevronDown size={14} />
+          </button>
+          {selectedContextOpen && <div id="selected-note-content">{note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>{agentId === "author-editor" && !terminalRequest && !terminalReplay && <button className="view-note-button" onClick={toggleNoteView}><Eye size={14} />{noteInChat ? "Close note" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}</div>}
         </div>
       </aside>
     </main>

@@ -1,11 +1,9 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { CircleStop, Command, Eye, Paperclip, X } from "lucide-react";
+import { CircleStop, Command, Paperclip, X } from "lucide-react";
 import { type DragEvent, useEffect, useRef, useState } from "react";
 import type { RunRequest, TerminalExitEvent } from "./types";
-import type { TokenUsage } from "./types";
-import TokenUsageSummary from "./TokenUsageSummary";
 
 type Props = {
   request: RunRequest;
@@ -14,13 +12,9 @@ type Props = {
   onExit(event: TerminalExitEvent): void;
   onError(error: Error): void;
   onClose(): void;
-  tokenUsage?: TokenUsage | null;
-  noteName?: string;
-  noteOpen?: boolean;
-  onToggleNote?(): void;
 };
 
-export default function CodexTerminal({ request, onStarted, onData, onExit, onError, onClose, tokenUsage, noteName, noteOpen, onToggleNote }: Props) {
+export default function CodexTerminal({ request, onStarted, onData, onExit, onError, onClose }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const sessionId = useRef<string | null>(null);
@@ -43,7 +37,7 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
       fontWeightBold: "700",
       letterSpacing: 0.15,
       lineHeight: 1.18,
-      scrollback: 20_000,
+      scrollback: 10_000,
       theme: {
         background: "#0b0910",
         foreground: "#eeeaf3",
@@ -167,16 +161,15 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
   }
 
   return (
-    <section className="codex-terminal-shell" aria-label="Interactive Codex CLI">
+    <section className="codex-terminal-shell live-terminal-shell" aria-label="Codex CLI">
       <header className="terminal-chrome">
         <div className="terminal-lights" aria-hidden="true"><i /><i /><i /></div>
         <div className="terminal-identity">
           <span><Command size={14} /></span>
-          <div><strong>Codex CLI</strong><small>Native interactive session</small></div>
+          <div><strong>Codex CLI</strong></div>
         </div>
         <div className="terminal-actions">
-          <span className={`terminal-live-state ${status}`}><i />{status === "starting" ? "Starting" : status === "live" ? "Interactive" : "Session ended"}</span>
-          {noteName && onToggleNote && <button className={noteOpen ? "terminal-note-toggle active" : "terminal-note-toggle"} onClick={onToggleNote} title={`${noteOpen ? "Close" : "View"} ${noteName}`}><Eye size={14} />{noteOpen ? "Close note" : "View note"}</button>}
+          {status !== "live" && <span className={`terminal-live-state ${status}`}><i />{status === "starting" ? "Starting" : "Session ended"}</span>}
           <button onClick={() => void attachImages()} disabled={status !== "live"} title="Attach an image to the Codex composer"><Paperclip size={14} />Attach</button>
           <button onClick={() => void interrupt()} disabled={status !== "live"} title="Send Ctrl+C to Codex"><CircleStop size={14} />Interrupt</button>
           <button className="terminal-close" onClick={() => void close()} title="Close terminal"><X size={15} /></button>
@@ -192,11 +185,6 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
         <div className="terminal-host" ref={host} />
         {dragging && <div className="terminal-drop-overlay"><Paperclip size={22} /><strong>Drop images into the Codex prompt</strong></div>}
       </div>
-      <footer className="terminal-footer">
-        {status === "exited"
-          ? <TokenUsageSummary usage={tokenUsage} unavailable terminal />
-          : <><span>Everything you type is sent directly to Codex</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> answer choices · slash commands and shortcuts work normally</span></>}
-      </footer>
     </section>
   );
 }

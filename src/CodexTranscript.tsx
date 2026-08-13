@@ -24,7 +24,7 @@ export default function CodexTranscript({ transcript, tokenUsage }: Props) {
       fontWeightBold: "700",
       letterSpacing: 0.15,
       lineHeight: 1.18,
-      scrollback: 20_000,
+      scrollback: 10_000,
       theme: {
         background: "#0b0910",
         foreground: "#eeeaf3",

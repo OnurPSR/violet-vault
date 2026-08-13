@@ -1,4 +1,4 @@
-import { MouseEvent, useEffect, useRef, useState } from "react";
+import { memo, MouseEvent, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -68,7 +68,7 @@ function VaultFigure({ src, alt, vaultPath, selected, assetRevision, onSelect }:
   );
 }
 
-export default function RichMessage({ content, vaultPath, selectable = false, selectedFigure, assetRevision, onTextSelect, onFigureSelect }: Props) {
+function RichMessage({ content, vaultPath, selectable = false, selectedFigure, assetRevision, onTextSelect, onFigureSelect }: Props) {
   const root = useRef<HTMLDivElement>(null);
 
   function captureSelection(event: MouseEvent<HTMLDivElement>) {
@@ -97,3 +97,5 @@ export default function RichMessage({ content, vaultPath, selectable = false, se
     </div>
   );
 }
+
+export default memo(RichMessage);

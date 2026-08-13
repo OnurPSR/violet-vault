@@ -26,6 +26,7 @@ const terminalSessions = new Map();
 const MAX_NOTES = 10_000;
 const MAX_NOTE_PREVIEW_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
+const TERMINAL_OUTPUT_BATCH_MS = 16;
 
 function statePath() {
   return path.join(app.getPath("userData"), "violet-vault-state.json");
@@ -496,12 +497,32 @@ async function startTerminalSession(request, sender, dimensions = {}, requestedC
     terminalSessions.set(sender.id, session);
 
     let terminalUsageBuffer = "";
+    let terminalOutputBuffer = "";
+    let terminalOutputTimer = null;
+
+    const flushTerminalOutput = () => {
+      if (!terminalOutputBuffer) return;
+      const data = terminalOutputBuffer;
+      terminalOutputBuffer = "";
+      if (!sender.isDestroyed()) sender.send("agent:terminal-data", { clientSessionId, sessionId, data });
+    };
 
     terminal.onData((data) => {
       terminalUsageBuffer = `${terminalUsageBuffer}${data}`.slice(-64_000);
-      if (!sender.isDestroyed()) sender.send("agent:terminal-data", { clientSessionId, sessionId, data });
+      terminalOutputBuffer += data;
+      if (terminalOutputTimer === null) {
+        terminalOutputTimer = setTimeout(() => {
+          terminalOutputTimer = null;
+          flushTerminalOutput();
+        }, TERMINAL_OUTPUT_BATCH_MS);
+      }
     });
     terminal.onExit(async ({ exitCode, signal }) => {
+      if (terminalOutputTimer !== null) {
+        clearTimeout(terminalOutputTimer);
+        terminalOutputTimer = null;
+      }
+      flushTerminalOutput();
       if (terminalSessions.get(sender.id)?.id === sessionId) terminalSessions.delete(sender.id);
       let warning = "";
       try {
