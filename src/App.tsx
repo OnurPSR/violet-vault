@@ -278,8 +278,10 @@ export default function App() {
   const terminalTranscript = useRef<TerminalTranscriptBuffer>(createTerminalTranscriptBuffer());
   const terminalChatId = useRef<string | null>(null);
   const terminalSaveTimer = useRef<number | null>(null);
+  const selectedNotePath = useRef<string | null>(null);
   const agent = AGENTS.find((item) => item.id === agentId) ?? AGENTS[0];
   const AgentIcon = agent.icon;
+  selectedNotePath.current = note?.path ?? null;
   const searchResults = useMemo(
     () => notes.filter((item) => item.path.toLowerCase().includes(query.toLowerCase())).slice(0, 500),
     [notes, query],
@@ -351,6 +353,61 @@ export default function App() {
     }, 180);
     return () => clearTimeout(timer);
   }, [agentId, chats, effort, model, provider, ready, vaultPath]);
+
+  useEffect(() => {
+    if (!vaultPath) return;
+    let disposed = false;
+    let refreshTimer: number | null = null;
+    const changedPaths = new Set<string | null>();
+
+    const flushChanges = async () => {
+      refreshTimer = null;
+      const paths = [...changedPaths];
+      changedPaths.clear();
+      const selectedPath = selectedNotePath.current;
+      const unknownChange = paths.includes(null);
+      const markdownChanged = unknownChange || paths.some((item) => item?.toLowerCase().endsWith(".md"));
+      const selectedNoteChanged = Boolean(selectedPath) && (unknownChange || paths.includes(selectedPath));
+      const visualChanged = unknownChange || paths.some((item) => /\.(?:svg|png|jpe?g|webp|gif|bmp|tiff?|heic)$/i.test(item ?? ""));
+
+      try {
+        if (markdownChanged) {
+          const refreshed = await window.violet.restoreVault(vaultPath);
+          if (!disposed && refreshed) setNotes(refreshed.notes);
+        }
+        if (selectedPath && selectedNoteChanged) {
+          const result = await window.violet.readNote(vaultPath, selectedPath);
+          if (!disposed) {
+            setNote((current) => current?.path === selectedPath && current.content !== result.content
+              ? { ...current, content: result.content }
+              : current);
+            setNoteRevision((revision) => revision + 1);
+          }
+        } else if (!disposed && visualChanged) {
+          setNoteRevision((revision) => revision + 1);
+        }
+      } catch (cause) {
+        if (!disposed) setError(cause instanceof Error ? cause.message : "Unable to refresh the changed vault content.");
+      }
+    };
+
+    const removeListener = window.violet.onVaultChange((event) => {
+      if (event.vaultPath !== vaultPath) return;
+      changedPaths.add(event.path);
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => void flushChanges(), 140);
+    });
+    void window.violet.watchVault(vaultPath).catch((cause) => {
+      if (!disposed) setError(cause instanceof Error ? cause.message : "Unable to watch the selected vault for changes.");
+    });
+
+    return () => {
+      disposed = true;
+      removeListener();
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      void window.violet.unwatchVault();
+    };
+  }, [vaultPath]);
 
   useEffect(() => () => {
     if (terminalSaveTimer.current !== null) window.clearTimeout(terminalSaveTimer.current);
@@ -854,6 +911,28 @@ export default function App() {
     "--right-resizer-width": rightPanelOpen ? "5px" : "0px",
   } as CSSProperties;
 
+  const noteViewer = noteInChat && note ? (
+    <article className={`note-in-chat ${terminalRequest || terminalReplay ? "terminal-note-pane" : ""}`}>
+      <header>
+        <div><FileText size={16} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>
+        <button onClick={() => setNoteInChat(false)} title="Close note view" aria-label="Close note view"><X size={15} /></button>
+      </header>
+      <div className="note-rendered">
+        <RichMessage
+          content={note.content ?? ""}
+          vaultPath={vaultPath}
+          notePath={note.path}
+          selectable={agentId === "author-editor"}
+          selectedFigure={selectedFigure?.path}
+          assetRevision={noteRevision}
+          onTextSelect={agentId === "author-editor" ? setSelectedText : undefined}
+          onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined}
+        />
+      </div>
+      {agentId === "author-editor" && <footer>Select text or click a figure to scope the next edit.</footer>}
+    </article>
+  ) : null;
+
   return (
     <main className={`app-shell ${leftPanelOpen ? "" : "left-panel-hidden"} ${rightPanelOpen ? "" : "right-panel-hidden"}`} style={layoutStyle}>
       <aside className={`agent-sidebar ${menu ? "mobile-open" : ""}`}>
@@ -934,7 +1013,7 @@ export default function App() {
           }}
         >
           {terminalRequest ? (
-            <div className="terminal-workspace">
+            <div className={`terminal-workspace ${noteViewer ? "with-note" : ""}`}>
               {error && <div className="error-banner terminal-error"><span>{error}</span><button onClick={() => setError(null)}><X size={13} /></button></div>}
               <div className="terminal-session-pane">
                 <CodexTerminal
@@ -946,9 +1025,10 @@ export default function App() {
                   onClose={closeTerminalView}
                 />
               </div>
+              {noteViewer}
             </div>
           ) : terminalReplay ? (
-            <div className="terminal-workspace"><CodexTranscript transcript={terminalReplay} tokenUsage={terminalTokenUsage} /></div>
+            <div className={`terminal-workspace ${noteViewer ? "with-note" : ""}`}><CodexTranscript transcript={terminalReplay} tokenUsage={terminalTokenUsage} />{noteViewer}</div>
           ) : messages.length === 0 && !noteInChat ? (
             <div className="empty-state">
               <div className="empty-orb"><Sparkles size={24} /></div>
@@ -959,26 +1039,7 @@ export default function App() {
             </div>
           ) : (
             <div className="message-list">
-              {noteInChat && note && (
-                <article className="note-in-chat">
-                  <header>
-                    <div><FileText size={16} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>
-                    <button onClick={() => setNoteInChat(false)} title="Close note view" aria-label="Close note view"><X size={15} /></button>
-                  </header>
-                  <div className="note-rendered">
-                    <RichMessage
-                      content={note.content ?? ""}
-                      vaultPath={vaultPath}
-                      selectable={agentId === "author-editor"}
-                      selectedFigure={selectedFigure?.path}
-                      assetRevision={noteRevision}
-                      onTextSelect={agentId === "author-editor" ? setSelectedText : undefined}
-                      onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined}
-                    />
-                  </div>
-                  {agentId === "author-editor" && <footer>Select text or click a figure to scope the next edit.</footer>}
-                </article>
-              )}
+              {noteViewer}
               {messages.map((message) => (
                 <article key={message.id} className={`message ${message.role}`}>
                   <div className="message-avatar">{message.role === "user" ? "O" : <Sparkles size={15} />}</div>
@@ -1065,7 +1126,7 @@ export default function App() {
           <button className="section-label selected-context-toggle" onClick={() => setSelectedContextOpen((open) => !open)} aria-expanded={selectedContextOpen} aria-controls="selected-note-content">
             <span>SELECTED NOTE</span><ChevronDown size={14} />
           </button>
-          {selectedContextOpen && <div id="selected-note-content">{note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>{agentId === "author-editor" && !terminalRequest && !terminalReplay && <button className="view-note-button" onClick={toggleNoteView}><Eye size={14} />{noteInChat ? "Close note" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}</div>}
+          {selectedContextOpen && <div id="selected-note-content">{note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>{agentId === "author-editor" && <button className="view-note-button" onClick={toggleNoteView}><Eye size={14} />{noteInChat ? "Close note" : terminalRequest || terminalReplay ? "Open note beside terminal" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}</div>}
         </div>
       </aside>
     </main>

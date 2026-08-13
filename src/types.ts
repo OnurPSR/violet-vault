@@ -126,6 +126,9 @@ export type VioletBridge = {
   restoreVault(vaultPath: string): Promise<{ vaultPath: string; vaultName: string; notes: Note[] } | null>;
   readNote(vaultPath: string, notePath: string): Promise<{ content: string }>;
   readVaultAsset(vaultPath: string, assetPath: string): Promise<{ dataUrl: string }>;
+  watchVault(vaultPath: string): Promise<{ watching: boolean }>;
+  unwatchVault(): Promise<{ watching: boolean }>;
+  onVaultChange(callback: (event: { vaultPath: string; path: string | null }) => void): () => void;
   chooseImages(): Promise<Attachment[]>;
   pathForFile(file: File): string;
   checkCli(): Promise<CliStatus>;

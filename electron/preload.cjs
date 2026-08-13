@@ -8,6 +8,13 @@ contextBridge.exposeInMainWorld("violet", {
   restoreVault: (vaultPath) => ipcRenderer.invoke("vault:restore", vaultPath),
   readNote: (vaultPath, notePath) => ipcRenderer.invoke("vault:read-note", { vaultPath, notePath }),
   readVaultAsset: (vaultPath, assetPath) => ipcRenderer.invoke("vault:read-asset", { vaultPath, assetPath }),
+  watchVault: (vaultPath) => ipcRenderer.invoke("vault:watch", vaultPath),
+  unwatchVault: () => ipcRenderer.invoke("vault:unwatch"),
+  onVaultChange: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("vault:changed", listener);
+    return () => ipcRenderer.removeListener("vault:changed", listener);
+  },
   chooseImages: () => ipcRenderer.invoke("images:choose"),
   pathForFile: (file) => webUtils.getPathForFile(file),
   checkCli: () => ipcRenderer.invoke("cli:status"),

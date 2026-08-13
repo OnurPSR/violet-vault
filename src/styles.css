@@ -35,8 +35,26 @@
   padding: 18px;
 }
 
+.terminal-workspace.with-note {
+  grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
+}
+
 .terminal-session-pane {
   min-width: 0;
+  min-height: 0;
+}
+
+.terminal-note-pane.note-in-chat {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.terminal-note-pane .note-rendered {
+  max-height: none;
   min-height: 0;
 }
 
@@ -310,6 +328,7 @@
 
 @media (max-width: 760px) {
   .terminal-workspace { padding: 10px; }
+  .terminal-workspace.with-note { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(320px, 1fr) minmax(280px, 0.8fr); overflow: auto; }
   .codex-terminal-shell { border-radius: 12px; }
   .terminal-actions button:not(.terminal-close) { width: 30px; padding: 0; justify-content: center; font-size: 0; }
   .terminal-footer { display: none; }
@@ -1312,6 +1331,18 @@ body.panel-resizing {
   object-fit: contain;
 }
 
+.vault-figure.svg-figure {
+  background: #fff;
+}
+
+.vault-figure.svg-figure img {
+  background: #fff;
+}
+
+.vault-figure.svg-figure .vault-figure-caption {
+  background: #0d0b11;
+}
+
 .vault-figure-caption {
   display: block;
   padding: 9px 12px;
@@ -1334,6 +1365,29 @@ body.panel-resizing {
 }
 
 .figure-unavailable { color: #b998a1; }
+
+.mermaid-diagram {
+  display: grid;
+  margin: 18px 0;
+  overflow: auto;
+  place-items: center;
+  padding: 18px;
+  border: 1px solid rgba(176, 151, 255, 0.18);
+  border-radius: 13px;
+  background: #111018;
+}
+
+.mermaid-diagram svg {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 620px;
+}
+
+.mermaid-unavailable {
+  border-left: 3px solid #b998a1;
+}
 
 .message-edit {
   display: grid;

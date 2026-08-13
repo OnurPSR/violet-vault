@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session } from "electron";
 import { spawn } from "node:child_process";
 import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, watch } from "node:fs";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -23,6 +23,8 @@ const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bm
 const VAULT_FIGURE_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ".svg"]);
 const activeRuns = new Map();
 const terminalSessions = new Map();
+const vaultWatchers = new Map();
+const vaultWatchGenerations = new Map();
 const MAX_NOTES = 10_000;
 const MAX_NOTE_PREVIEW_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
@@ -53,6 +55,33 @@ async function saveState(value) {
 function relativeIsSafe(root, target) {
   const relative = path.relative(path.resolve(root), path.resolve(target));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function closeVaultWatcher(senderId) {
+  const watcher = vaultWatchers.get(senderId);
+  if (!watcher) return;
+  vaultWatchers.delete(senderId);
+  watcher.close();
+}
+
+async function watchVault(vaultPath, sender) {
+  if (typeof vaultPath !== "string") throw new Error("Select an Obsidian vault first.");
+  const generation = (vaultWatchGenerations.get(sender.id) ?? 0) + 1;
+  vaultWatchGenerations.set(sender.id, generation);
+  const metadata = await stat(vaultPath);
+  if (!metadata.isDirectory()) throw new Error("The selected vault path is not a directory.");
+  if (sender.isDestroyed() || vaultWatchGenerations.get(sender.id) !== generation) return { watching: false };
+  closeVaultWatcher(sender.id);
+  const watcher = watch(vaultPath, { recursive: true }, (_eventType, filename) => {
+    if (sender.isDestroyed()) return closeVaultWatcher(sender.id);
+    const changedPath = typeof filename === "string" || Buffer.isBuffer(filename)
+      ? filename.toString().split(path.sep).join("/")
+      : null;
+    sender.send("vault:changed", { vaultPath, path: changedPath });
+  });
+  watcher.on("error", () => closeVaultWatcher(sender.id));
+  vaultWatchers.set(sender.id, watcher);
+  return { watching: true };
 }
 
 async function scanVault(vaultPath) {
@@ -566,6 +595,12 @@ function registerHandlers() {
   });
   ipcMain.handle("vault:read-note", (_, value) => readVaultNote(value?.vaultPath, value?.notePath));
   ipcMain.handle("vault:read-asset", (_, value) => readVaultAsset(value?.vaultPath, value?.assetPath));
+  ipcMain.handle("vault:watch", (event, vaultPath) => watchVault(vaultPath, event.sender));
+  ipcMain.handle("vault:unwatch", (event) => {
+    vaultWatchGenerations.set(event.sender.id, (vaultWatchGenerations.get(event.sender.id) ?? 0) + 1);
+    closeVaultWatcher(event.sender.id);
+    return { watching: false };
+  });
   ipcMain.handle("images:choose", async () => {
     const result = await dialog.showOpenDialog({
       title: "Attach handwritten pages",
@@ -645,6 +680,8 @@ function createWindow() {
     if (child) child.kill("SIGTERM");
     const session = terminalSessions.get(senderId);
     if (session) session.terminal.kill("SIGTERM");
+    vaultWatchGenerations.delete(senderId);
+    closeVaultWatcher(senderId);
   });
 
   const developmentUrl = process.env.VITE_DEV_SERVER_URL;
