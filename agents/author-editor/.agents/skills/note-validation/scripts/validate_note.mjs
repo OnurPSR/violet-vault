@@ -295,7 +295,7 @@ try {
     matrices,
     figures,
     issues,
-    manualRequired: ["Recompute arithmetic and review semantic matrix dimensions.", "Visually compare every figure created or regenerated during this task with its source content."],
+    manualRequired: ["Recompute arithmetic and review semantic matrix dimensions.", "Apply the current run's visual-verification setting to every figure created or regenerated during this task."],
     ok: errors.length === 0,
   };
   const rendered = `${JSON.stringify(report, null, 2)}\n`;

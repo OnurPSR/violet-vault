@@ -89,7 +89,7 @@ If a required skill is unavailable, continue only when a reliable result remains
 
 Perform only the checks relevant to the changes made.
 
-Confirm that the requested content was added or edited in the intended location, unrelated content was preserved, and affected structures remain valid. Every figure created or regenerated during the task must pass the note-validation skill's rendered visual comparison against its source content.
+Confirm that the requested content was added or edited in the intended location, unrelated content was preserved, and affected structures remain valid. Validate created or regenerated figures according to the current run's visual-verification setting and the note-validation skill.
 
 Report any unresolved uncertainty or material validation limitation.
 

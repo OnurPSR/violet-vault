@@ -1,8 +1,11 @@
-import { memo, MouseEvent, useEffect, useId, useRef, useState } from "react";
+import { BookOpenText, Sparkles } from "lucide-react";
+import { memo, MouseEvent, ReactNode, useEffect, useId, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { normalizeMarkdownForRendering } from "./markdown-normalization";
+import { splitRetrieverResponse } from "./retriever-sections";
 
 type Props = {
   content: string;
@@ -11,19 +14,10 @@ type Props = {
   selectable?: boolean;
   selectedFigure?: string | null;
   assetRevision?: number;
+  provenanceMode?: boolean;
   onTextSelect?: (text: string) => void;
   onFigureSelect?: (figure: { path: string; alt: string; dataUrl: string }) => void;
 };
-
-function normalizeObsidianEmbeds(content: string) {
-  return content.replace(/!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_match, source: string, label?: string) => {
-    const embedOption = label?.trim();
-    const caption = embedOption && !/^\d+(?:x\d+)?$/i.test(embedOption) ? embedOption : undefined;
-    const alt = caption || source.split("/").at(-1)?.replace(/\.[^.]+$/, "") || "Vault figure";
-    const vaultRootPath = `/${source.trim().replace(/^\/+/, "").replaceAll(" ", "%20")}`;
-    return `![${alt.replaceAll("]", "\\]")}](${vaultRootPath})`;
-  });
-}
 
 function decodeAssetPath(source: string) {
   try { return decodeURIComponent(source); } catch { return source; }
@@ -126,7 +120,7 @@ function VaultFigure({ src, alt, vaultPath, notePath, selected, assetRevision, o
   );
 }
 
-function RichMessage({ content, vaultPath, notePath, selectable = false, selectedFigure, assetRevision, onTextSelect, onFigureSelect }: Props) {
+function RichMessage({ content, vaultPath, notePath, selectable = false, selectedFigure, assetRevision, provenanceMode = false, onTextSelect, onFigureSelect }: Props) {
   const root = useRef<HTMLDivElement>(null);
 
   function captureSelection(event: MouseEvent<HTMLDivElement>) {
@@ -140,8 +134,8 @@ function RichMessage({ content, vaultPath, notePath, selectable = false, selecte
     onTextSelect(text.slice(0, 8_000));
   }
 
-  return (
-    <div className={`rich-message ${selectable ? "selectable-content" : ""}`} ref={root} onMouseUp={captureSelection}>
+  function renderMarkdown(markdown: string): ReactNode {
+    return (
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
@@ -156,8 +150,29 @@ function RichMessage({ content, vaultPath, notePath, selectable = false, selecte
           a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
         }}
       >
-        {normalizeObsidianEmbeds(content)}
+        {normalizeMarkdownForRendering(markdown)}
       </ReactMarkdown>
+    );
+  }
+
+  const sections = provenanceMode ? splitRetrieverResponse(content) : [];
+  const hasProvenanceSections = sections.some((section) => section.kind !== "direct");
+
+  return (
+    <div className={`rich-message ${selectable ? "selectable-content" : ""} ${hasProvenanceSections ? "provenance-response" : ""}`} ref={root} onMouseUp={captureSelection}>
+      {hasProvenanceSections
+        ? sections.map((section, index) => section.kind === "direct"
+          ? <div className="retriever-direct" key={`${section.kind}-${index}`}>{renderMarkdown(section.content)}</div>
+          : (
+            <section className={`retriever-section ${section.kind}`} key={`${section.kind}-${index}`} aria-label={section.kind === "note" ? "Information from the note" : "Agent explanation"}>
+              <header>
+                {section.kind === "note" ? <BookOpenText size={15} /> : <Sparkles size={15} />}
+                <span>{section.kind === "note" ? "From the note" : "Agent explanation"}</span>
+              </header>
+              <div className="retriever-section-body">{renderMarkdown(section.content)}</div>
+            </section>
+          ))
+        : renderMarkdown(content)}
     </div>
   );
 }

@@ -34,3 +34,8 @@ test("compacts many large conversations instead of rejecting state saves", () =>
   assert.ok(restored.conversations.filter((item) => item.terminalTranscript).length < conversations.length);
   assert.equal(restored.conversations.at(-1).terminalTranscript, undefined);
 });
+
+test("visual verification defaults on and preserves an explicit off setting", () => {
+  assert.equal(cleanState({}).visualVerification, true);
+  assert.equal(cleanState({ visualVerification: false }).visualVerification, false);
+});

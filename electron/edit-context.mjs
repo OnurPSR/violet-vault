@@ -12,10 +12,11 @@ export function fingerprintText(source) {
 
 export async function validateEditContextRevision(request) {
   const context = request?.editContext;
-  if (request?.agentId !== "author-editor" || !request.notePath || !context?.noteRevision) return request;
+  if (!["author-editor", "retriever"].includes(request?.agentId) || !request.notePath || !context?.noteRevision) return request;
+  const targetName = request.agentId === "retriever" ? "question context" : "edit target";
   const content = await readFile(path.resolve(request.vaultPath, request.notePath), "utf8");
   if (fingerprintText(content) !== context.noteRevision) {
-    throw new Error("The selected note changed after the edit target was captured. Refresh the note and select the target again.");
+    throw new Error(`The selected note changed after the ${targetName} was captured. Refresh the note and select the passage again.`);
   }
   if (context.selectionMatch === "exact" && context.selectionStart && context.selectionEnd && context.selectedText) {
     const selected = content.slice(context.selectionStart.offset, context.selectionEnd.offset);

@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Image as ImageIcon,
   Eye,
+  Info,
   Library,
   Menu,
   PanelLeftClose,
@@ -40,7 +41,7 @@ type FolderEntry = { name: string; path: string; noteCount: number };
 type SelectedFigure = { path: string; alt: string; dataUrl: string };
 
 const AGENTS = [
-  { id: "retriever" as AgentId, name: "Note Retriever", mode: "Read only", text: "Find concepts, answer questions and surface related notes or figures.", icon: Search, color: "#8b7cff" },
+  { id: "retriever" as AgentId, name: "Note Retriever", mode: "Read only", text: "Understand the note, retrieve what it says, and keep note evidence separate from explanation.", icon: Search, color: "#8b7cff" },
   { id: "author-editor" as AgentId, name: "Note Author–Editor", mode: "Author + edit", text: "Append, reconstruct, insert, or make scoped edits in a selected vault note.", icon: SquarePen, color: "#b06cff" },
 ];
 
@@ -239,6 +240,7 @@ export default function App() {
   const [provider, setProvider] = useState<ProviderId>("codex");
   const [model, setModel] = useState("gpt-5.6-sol");
   const [effort, setEffort] = useState<Effort>("high");
+  const [visualVerification, setVisualVerification] = useState(true);
   const [chats, setChats] = useState<Conversation[]>([]);
   const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -326,6 +328,7 @@ export default function App() {
         setProvider(state.provider);
         setModel(validModel(state.provider, state.model));
         setEffort(state.effort);
+        setVisualVerification(state.visualVerification !== false);
         setCliStatus(status);
         if (state.vaultPath) {
           const restored = await window.violet.restoreVault(state.vaultPath);
@@ -347,12 +350,12 @@ export default function App() {
 
   useEffect(() => {
     if (!ready) return;
-    const state: AppState = { conversations: chats, vaultPath, agentId, provider, model, effort };
+    const state: AppState = { conversations: chats, vaultPath, agentId, provider, model, effort, visualVerification };
     const timer = setTimeout(() => {
       window.violet.saveState(state).catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to save chat history."));
     }, 180);
     return () => clearTimeout(timer);
-  }, [agentId, chats, effort, model, provider, ready, vaultPath]);
+  }, [agentId, chats, effort, model, provider, ready, vaultPath, visualVerification]);
 
   useEffect(() => {
     if (!vaultPath) return;
@@ -607,8 +610,8 @@ export default function App() {
       return setError("Select the target note before sending handwritten pages.");
     }
 
-    const editContext = agentId === "author-editor"
-      ? buildEditContext(note?.content, selectedText, selectedFigure)
+    const editContext = note
+      ? buildEditContext(note.content, selectedText, agentId === "author-editor" ? selectedFigure : null)
       : undefined;
 
     if (provider === "codex" && agentId !== "retriever") {
@@ -631,6 +634,7 @@ export default function App() {
         messages,
         prompt: text,
         images,
+        visualVerification,
         editContext,
       });
       setTerminalSessionId(null);
@@ -722,6 +726,7 @@ export default function App() {
         messages: priorMessages,
         prompt: text,
         images: currentImages,
+        visualVerification,
         editContext,
       });
       closeStream();
@@ -840,7 +845,14 @@ export default function App() {
   }
 
   function toggleNoteView() {
-    setNoteInChat((open) => !open);
+    setNoteInChat((open) => {
+      const next = !open;
+      if (next && !terminalRequest && !terminalReplay) {
+        stickToBottom.current = false;
+        requestAnimationFrame(() => scrollArea.current?.scrollTo({ top: 0, behavior: "smooth" }));
+      }
+      return next;
+    });
   }
 
   function startPanelResize(side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>) {
@@ -914,7 +926,7 @@ export default function App() {
   const noteViewer = noteInChat && note ? (
     <article className={`note-in-chat ${terminalRequest || terminalReplay ? "terminal-note-pane" : ""}`}>
       <header>
-        <div><FileText size={16} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>
+        <div><FileText size={16} /><span><strong>{note.name}</strong><small>{note.path} · Rendered view</small></span></div>
         <button onClick={() => setNoteInChat(false)} title="Close note view" aria-label="Close note view"><X size={15} /></button>
       </header>
       <div className="note-rendered">
@@ -922,14 +934,14 @@ export default function App() {
           content={note.content ?? ""}
           vaultPath={vaultPath}
           notePath={note.path}
-          selectable={agentId === "author-editor"}
+          selectable
           selectedFigure={selectedFigure?.path}
           assetRevision={noteRevision}
-          onTextSelect={agentId === "author-editor" ? setSelectedText : undefined}
+          onTextSelect={setSelectedText}
           onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined}
         />
       </div>
-      {agentId === "author-editor" && <footer>Select text or click a figure to scope the next edit.</footer>}
+      <footer>{agentId === "author-editor" ? "Select text or click a figure to scope the next edit." : "Highlight text to ask about that passage."}</footer>
     </article>
   ) : null;
 
@@ -1046,7 +1058,7 @@ export default function App() {
                   <div className="message-content">
                     <div className="message-meta"><strong>{message.role === "user" ? "You" : agent.name}</strong><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>
                     {message.role === "assistant"
-                      ? <><RichMessage content={message.content} vaultPath={vaultPath} selectedFigure={selectedFigure?.path} onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined} /><TokenUsageSummary usage={message.tokenUsage} unavailable={message.tokenUsage === null} /></>
+                      ? <><RichMessage content={message.content} vaultPath={vaultPath} notePath={note?.path} provenanceMode={agentId === "retriever"} selectedFigure={selectedFigure?.path} onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined} /><TokenUsageSummary usage={message.tokenUsage} unavailable={message.tokenUsage === null} /></>
                       : <p>{message.content}</p>}
                   </div>
                   {message.role === "user" && <button className="message-edit" disabled={running} onClick={() => { setEditing(message.id); setPrompt(message.content); }} title="Edit question"><Pencil size={14} /></button>}
@@ -1062,25 +1074,56 @@ export default function App() {
             {error && <div className="error-banner"><span>{error}</span><button onClick={() => setError(null)}><X size={13} /></button></div>}
             <div className={`composer ${dragging ? "dragging" : ""} ${editing ? "editing" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={drop}>
               {editing && <div className="editing-banner"><Pencil size={13} />Editing stored question<button onClick={() => { setEditing(null); setPrompt(""); }}><X size={13} /></button></div>}
-              {agentId === "author-editor" && note && (
-                <div className="edit-target-tray">
-                  <div className="edit-target-heading"><Pencil size={13} /><strong>Edit target</strong>{(selectedText || selectedFigure) && <span>Scoped selection</span>}</div>
+              {note && (
+                <div className={`edit-target-tray ${agentId === "retriever" ? "retrieval-context-tray" : ""}`}>
+                  <div className="edit-target-heading">
+                    {agentId === "author-editor" ? <Pencil size={13} /> : <FileText size={13} />}
+                    <strong>{agentId === "author-editor" ? "Edit target" : "Ask about note"}</strong>
+                    {agentId === "author-editor" && (selectedText || selectedFigure) && <span>Scoped selection</span>}
+                    {agentId === "retriever" && <span>{selectedText ? "Highlighted passage" : "Read-only context"}</span>}
+                  </div>
                   <div className="edit-target-items">
-                    <span className="edit-target-note"><FileText size={14} /><span><strong>{note.name}</strong><small>Selected note</small></span></span>
-                    {selectedText && <span className="edit-target-text"><span>“{selectedText.replace(/\s+/g, " ").slice(0, 100)}{selectedText.length > 100 ? "…" : ""}”</span><button onClick={() => setSelectedText("")} aria-label="Remove selected text"><X size={12} /></button></span>}
-                    {selectedFigure && <span className="edit-target-figure"><img src={selectedFigure.dataUrl} alt="" /><span><strong>{selectedFigure.alt}</strong><small>Selected figure</small></span><button onClick={() => setSelectedFigure(null)} aria-label="Remove selected figure"><X size={12} /></button></span>}
+                    <span className="edit-target-note">
+                      <FileText size={14} />
+                      <span><strong>{note.name}</strong><small>Selected note</small></span>
+                      <button onClick={() => { setNote(null); setNoteInChat(false); setSelectedText(""); setSelectedFigure(null); }} aria-label="Remove selected note"><X size={12} /></button>
+                    </span>
+                    {agentId === "retriever" && selectedText && <span className="edit-target-text question-context-text"><span>“{selectedText.replace(/\s+/g, " ").slice(0, 100)}{selectedText.length > 100 ? "…" : ""}”</span><button onClick={() => setSelectedText("")} aria-label="Remove highlighted question context"><X size={12} /></button></span>}
+                    {agentId === "author-editor" && selectedText && <span className="edit-target-text"><span>“{selectedText.replace(/\s+/g, " ").slice(0, 100)}{selectedText.length > 100 ? "…" : ""}”</span><button onClick={() => setSelectedText("")} aria-label="Remove selected text"><X size={12} /></button></span>}
+                    {agentId === "author-editor" && selectedFigure && <span className="edit-target-figure"><img src={selectedFigure.dataUrl} alt="" /><span><strong>{selectedFigure.alt}</strong><small>Selected figure</small></span><button onClick={() => setSelectedFigure(null)} aria-label="Remove selected figure"><X size={12} /></button></span>}
                   </div>
                 </div>
               )}
               {images.length > 0 && <div className="attachment-row">{images.map((image, index) => <div className="attachment-chip" key={image.path}><span><ImageIcon size={15} /></span><div><strong>{image.name}</strong><small>{Math.ceil(image.size / 1024)} KB</small></div><button onClick={() => setImages((all) => all.filter((_, itemIndex) => itemIndex !== index))}><X size={13} /></button></div>)}</div>}
               {dragging && <div className="drop-overlay"><ImageIcon size={24} /><strong>Drop handwritten pages here</strong></div>}
-              <textarea value={prompt} disabled={running} onChange={(event) => setPrompt(event.target.value)} onKeyDown={key} placeholder={`Message ${agent.name}…`} rows={3} />
+              <textarea value={prompt} disabled={running} onChange={(event) => setPrompt(event.target.value)} onKeyDown={key} placeholder={agentId === "retriever" && selectedText ? `Ask about the highlighted passage in ${note?.name ?? "the note"}…` : `Message ${agent.name}…`} rows={3} />
               <div className="composer-tools">
-                <div><button className="composer-button" onClick={() => void attachImages()} disabled={running} title="Attach images"><Paperclip size={17} /></button>{note && <span className="context-pill"><FileText size={13} />{note.name}<button onClick={() => { setNote(null); setNoteInChat(false); setSelectedText(""); setSelectedFigure(null); }}><X size={12} /></button></span>}</div>
+                <div>
+                  <button className="composer-button" onClick={() => void attachImages()} disabled={running} title="Attach images"><Paperclip size={17} /></button>
+                  {agentId === "author-editor" && (
+                    <div className={`visual-check ${visualVerification ? "active" : ""}`}>
+                      <button
+                        type="button"
+                        className="visual-check-toggle"
+                        role="switch"
+                        aria-checked={visualVerification}
+                        onClick={() => setVisualVerification((enabled) => !enabled)}
+                      >
+                        <Eye size={14} />
+                        <span>Advanced Visual Verification</span>
+                        <i aria-hidden="true" />
+                      </button>
+                      <span className="visual-check-help">
+                        <button type="button" aria-label="About visual verification"><Info size={13} /></button>
+                        <span role="tooltip">Compares generated figures with the source again for an added layer of reliability. Turn it off to reduce token usage. Keeping it on is recommended.</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
                 <div className="send-area">{running ? <button className="send-button stop" onClick={() => void stop()} title="Stop agent"><CircleStop size={17} /></button> : <button className="send-button" onClick={() => void send()} disabled={editing ? !prompt.trim() : !canSend} title={canSend || editing ? "Send" : "Select a vault and install the selected CLI"}><Send size={17} /></button>}</div>
               </div>
             </div>
-            <p className="composer-hint">{agentId === "retriever" ? "Retriever starts in read-only mode." : "Writes start vault-scoped; Codex will surface any approval it needs inside the terminal."}</p>
+            <p className="composer-hint">{agentId === "retriever" ? note ? "Retriever will start with the selected note and keep the vault read-only." : "Retriever starts in read-only mode." : "Writes start vault-scoped; Codex will surface any approval it needs inside the terminal."}</p>
           </div>
         )}
       </section>
@@ -1126,7 +1169,7 @@ export default function App() {
           <button className="section-label selected-context-toggle" onClick={() => setSelectedContextOpen((open) => !open)} aria-expanded={selectedContextOpen} aria-controls="selected-note-content">
             <span>SELECTED NOTE</span><ChevronDown size={14} />
           </button>
-          {selectedContextOpen && <div id="selected-note-content">{note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div>{agentId === "author-editor" && <button className="view-note-button" onClick={toggleNoteView}><Eye size={14} />{noteInChat ? "Close note" : terminalRequest || terminalReplay ? "Open note beside terminal" : "View note in chat"}</button>}</div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}</div>}
+          {selectedContextOpen && <div id="selected-note-content">{note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div><button className="view-note-button" onClick={toggleNoteView}><Eye size={14} />{noteInChat ? "Close rendered note" : terminalRequest || terminalReplay ? "View rendered note beside terminal" : "View rendered note"}</button></div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}</div>}
         </div>
       </aside>
     </main>

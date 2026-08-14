@@ -78,6 +78,7 @@ export type AppState = {
   provider: ProviderId;
   model: string;
   effort: Effort;
+  visualVerification: boolean;
 };
 
 export type RunRequest = {
@@ -90,6 +91,7 @@ export type RunRequest = {
   messages: Message[];
   prompt: string;
   images: Attachment[];
+  visualVerification?: boolean;
   editContext?: EditContext;
 };
 

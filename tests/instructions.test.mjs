@@ -8,6 +8,7 @@ import { loadAgentInstructions } from "../electron/instructions.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const AUTHOR_CONTRACT_BUDGET_BYTES = 8 * 1024;
+const RETRIEVER_CONTRACT_BUDGET_BYTES = 3 * 1024;
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "violet-instructions-"));
@@ -86,4 +87,20 @@ test("the author-editor contract points at skills that actually exist", async ()
   assert.match(instructions, /- note-editing: .*SKILL\.md/);
   assert.match(instructions, /- note-validation: .*SKILL\.md/);
   assert.match(instructions, /- plain-note-authoring: .*SKILL\.md/);
+});
+
+test("the retriever contract is compact and defines the UI provenance headings", async () => {
+  const contractPath = path.join(projectRoot, "agents", "retriever", "AGENTS.md");
+  const [contract, metadata] = await Promise.all([readFile(contractPath, "utf8"), stat(contractPath)]);
+
+  assert.ok(metadata.size < RETRIEVER_CONTRACT_BUDGET_BYTES);
+  assert.match(contract, /read-only agent/i);
+  assert.match(contract, /First understand the relevant note/);
+  assert.match(contract, /When the interface provides a selected note, read that exact note first/);
+  assert.match(contract, /When the user highlights a passage in the rendered note/);
+  assert.match(contract, /When a figure materially supports the answer, show the original figure/);
+  assert.match(contract, /Write mathematics as `\$\.\.\.\$` for inline math/);
+  assert.match(contract, /opening and closing `\$\$` on their own lines/);
+  assert.match(contract, /^## From the note$/m);
+  assert.match(contract, /^## Agent explanation$/m);
 });

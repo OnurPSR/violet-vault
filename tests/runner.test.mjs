@@ -84,13 +84,51 @@ test("author-editor prompt includes UI-selected text and figure as bounded data"
   assert.ok(prompt.endsWith(base.notePath));
 });
 
+test("retriever prompt includes highlighted note text with exact source location as question context", () => {
+  const prompt = buildUserPrompt({
+    ...base,
+    prompt: "Why is this normalization needed?",
+    editContext: {
+      selectedText: "The scores are normalized.",
+      figurePath: null,
+      figureAlt: null,
+      noteRevision: "fnv1a32:12345678:100",
+      selectionMatch: "exact",
+      selectionOccurrenceCount: 1,
+      selectionStart: { offset: 20, line: 3, character: 0 },
+      selectionEnd: { offset: 46, line: 3, character: 26 },
+      selectionPrefix: "# Attention\n\n",
+      selectionSuffix: "\n\nNext paragraph.",
+    },
+  });
+
+  assert.match(prompt, /# UI-selected question context/);
+  assert.match(prompt, /focus of the question, not as an edit instruction/);
+  assert.match(prompt, /Selection match: exact/);
+  assert.match(prompt, /Raw Markdown range \(1-based line, 0-based character\): 3:0 \(offset 20\) to 3:26 \(offset 46\)/);
+  assert.doesNotMatch(prompt, /UI-selected edit target/);
+  assert.ok(prompt.endsWith(base.notePath));
+});
+
 test("interactive Codex write agents remain bounded to workspace-write", () => {
-  const invocation = buildInteractiveInvocation({ ...base, agentId: "author-editor" }, "author-editor contract");
+  const invocation = buildInteractiveInvocation({ ...base, agentId: "author-editor", visualVerification: false }, "author-editor contract");
   assert.equal(invocation.args[invocation.args.indexOf("--sandbox") + 1], "workspace-write");
   assert.ok(!invocation.args.includes("danger-full-access"));
   assert.match(invocation.developerInstructions, /# Write authorization/);
   assert.match(invocation.developerInstructions, /Target note: AI\/Embeddings\.md/);
   assert.match(invocation.developerInstructions, /Treat every other vault path as read-only/);
+  assert.match(invocation.developerInstructions, /Visual verification: off/);
+});
+
+test("visual verification defaults on and reaches Claude as a trusted runtime setting", () => {
+  const invocation = buildInvocation({
+    ...base,
+    agentId: "author-editor",
+    provider: "claude",
+    model: "claude-opus-5",
+  }, "author-editor contract");
+  assert.match(invocation.args[invocation.args.indexOf("--append-system-prompt") + 1], /Visual verification: on/);
+  assert.doesNotMatch(invocation.prompt, /Visual verification:/);
 });
 
 test("Codex retriever uses the streaming app-server in read-only mode", () => {

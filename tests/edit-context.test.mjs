@@ -42,3 +42,25 @@ test("rejects a stale edit target before the agent starts", async (t) => {
     editContext: { noteRevision: fingerprintText(original) },
   }), /changed after the edit target was captured/);
 });
+
+test("validates Retriever question context against the selected note revision", async (t) => {
+  const vaultPath = await mkdtemp(path.join(os.tmpdir(), "violet-question-context-"));
+  t.after(() => rm(vaultPath, { recursive: true, force: true }));
+  await mkdir(path.join(vaultPath, "Notes"));
+  const content = "# Target\n\nHighlighted passage.\n";
+  await writeFile(path.join(vaultPath, "Notes", "Target.md"), content);
+  const start = content.indexOf("Highlighted passage.");
+
+  await assert.doesNotReject(validateEditContextRevision({
+    agentId: "retriever",
+    vaultPath,
+    notePath: "Notes/Target.md",
+    editContext: {
+      noteRevision: fingerprintText(content),
+      selectionMatch: "exact",
+      selectedText: "Highlighted passage.",
+      selectionStart: { offset: start },
+      selectionEnd: { offset: start + "Highlighted passage.".length },
+    },
+  }));
+});

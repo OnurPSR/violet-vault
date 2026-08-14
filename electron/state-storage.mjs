@@ -12,6 +12,7 @@ export const defaultState = {
   provider: "codex",
   model: "gpt-5.6-sol",
   effort: "high",
+  visualVerification: true,
 };
 
 function cleanAgentId(value) {
@@ -70,6 +71,7 @@ export function cleanState(value) {
     provider: ["codex", "claude", "local"].includes(value.provider) ? value.provider : "codex",
     model: typeof value.model === "string" ? value.model : "gpt-5.6-sol",
     effort: ["low", "medium", "high"].includes(value.effort) ? value.effort : "high",
+    visualVerification: value.visualVerification !== false,
   };
 }
 
