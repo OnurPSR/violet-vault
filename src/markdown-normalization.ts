@@ -86,11 +86,22 @@ export function normalizeLatexDelimiters(content: string) {
 export function normalizeObsidianEmbeds(content: string) {
   return content.replace(/!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_match, source: string, label?: string) => {
     const embedOption = label?.trim();
-    const caption = embedOption && !/^\d+(?:x\d+)?$/i.test(embedOption) ? embedOption : undefined;
+    const size = embedOption?.match(/^(\d+)(?:x(\d+))?$/i);
+    const caption = embedOption && !size ? embedOption : undefined;
     const alt = caption || source.split("/").at(-1)?.replace(/\.[^.]+$/, "") || "Vault figure";
     const vaultRootPath = `/${source.trim().replace(/^\/+/, "").replaceAll(" ", "%20")}`;
-    return `![${alt.replaceAll("]", "\\]")}](${vaultRootPath})`;
+    const dimensions = size ? `?w=${size[1]}${size[2] ? `&h=${size[2]}` : ""}` : "";
+    return `![${alt.replaceAll("]", "\\]")}](${vaultRootPath}${dimensions})`;
   });
+}
+
+export function parseEmbedDimensions(source: string) {
+  const query = source.split("?")[1]?.split("#")[0];
+  if (!query) return null;
+  const parameters = new URLSearchParams(query);
+  const width = Number(parameters.get("w"));
+  const height = Number(parameters.get("h"));
+  return width > 0 ? { width, height: height > 0 ? height : null } : null;
 }
 
 export function normalizeMarkdownForRendering(content: string) {

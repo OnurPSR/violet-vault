@@ -35,10 +35,12 @@
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
+    "rehype-stringify": "^10.0.1",
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
     "unified": "^11.0.5",
     "yaml": "^2.8.1"
   },

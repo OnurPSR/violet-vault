@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import { normalizeMarkdownForRendering } from "./markdown-normalization";
+import { normalizeMarkdownForRendering, parseEmbedDimensions } from "./markdown-normalization";
 import { splitRetrieverResponse } from "./retriever-sections";
 
 type Props = {
@@ -70,6 +70,7 @@ function VaultFigure({ src, alt, vaultPath, notePath, selected, assetRevision, o
   const [failed, setFailed] = useState(false);
   const assetPath = src ? resolveAssetPath(src, notePath) : "";
   const isSvg = assetPath.split(/[?#]/, 1)[0].toLowerCase().endsWith(".svg");
+  const dimensions = src ? parseEmbedDimensions(src) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -113,7 +114,11 @@ function VaultFigure({ src, alt, vaultPath, notePath, selected, assetRevision, o
         }
       }}
     >
-      <img src={asset} alt={alt || "Figure from the selected vault"} />
+      <img
+        src={asset}
+        alt={alt || "Figure from the selected vault"}
+        style={dimensions ? { width: dimensions.width, height: dimensions.height ?? undefined, maxWidth: "100%" } : undefined}
+      />
       {alt && <span className="vault-figure-caption">{alt}</span>}
       {selected && <span className="figure-selected-badge">Selected for edit</span>}
     </span>

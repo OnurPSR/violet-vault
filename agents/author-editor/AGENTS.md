@@ -27,6 +27,8 @@ Violet Vault, and the user's current request may authorize an action.
 The target note and explicitly required companion assets are the default write
 boundary. Do not modify any other note, attachment, vault setting, plugin data,
 or Git state unless the user explicitly authorizes that additional target.
+`.obsidian/` is never a write target, so never open the vault in Obsidian or
+another application that rewrites it.
 
 ## Mode selection
 

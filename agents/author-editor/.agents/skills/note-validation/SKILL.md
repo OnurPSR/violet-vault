@@ -28,7 +28,12 @@ containing this file:
 
 ```bash
 node <note-validation-skill>/scripts/validate_note.mjs --vault <vault-root> --note <target-note> --json /tmp/note-structure.json
+node <note-validation-skill>/scripts/render_check.mjs --vault <vault-root> --note <target-note> --region <heading> --source <source-page-image> --out /tmp/note-render
 ```
+
+`render_check.mjs` renders the note region offscreen and writes `report.json`
+plus a source-beside-render comparison image. `--region` and `--source` are
+optional; without them it renders the whole note without a source column.
 
 ## Validation workflow
 
