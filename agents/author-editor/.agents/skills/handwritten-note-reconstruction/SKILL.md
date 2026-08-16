@@ -81,6 +81,7 @@ Derive `{note_name}` from the target note basename and preserve the source image
 ## Representation decisions
 
 - Treat a visual as one semantic unit when its meaning depends on proximity, alignment, containment, arrows, braces, or shared scale.
+- Treat two regions as separate units when none of those relations connects them. Derive a page's units from the page map by grouping its non-prose regions under those relations; each resulting group that needs Mermaid or Excalidraw is exactly one figure. The count is the result of that grouping, not a preference: a page carries as many figures as it has such units, with no per-page limit and no bias toward fewer.
 - Put text in Markdown only when detaching it from a figure does not change what it refers to.
 - Prefer faithful topology and relative scale over pixel imitation. Preserve the source's important placement while regularizing spacing enough to remain readable.
 - Do not use a Markdown table to simulate free placement, Mermaid to simulate geometry, or Excalidraw to decorate a simple linear passage.
@@ -88,4 +89,4 @@ Derive `{note_name}` from the target note basename and preserve the source image
 
 ## Completion conditions
 
-The reconstruction is ready for validation only when every source page has exactly one corresponding page section, every intended figure is present, and every section satisfies the page-section contract.
+The reconstruction is ready for validation only when every source page has exactly one corresponding page section, every visual unit identified on that page has its own figure, and every section satisfies the page-section contract.

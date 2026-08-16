@@ -102,7 +102,7 @@ Return a concise, user-oriented report containing only relevant items:
 - target note and action completed;
 - source pages used, when applicable;
 - main content or regions added or edited;
-- diagrams or assets created or updated;
+- diagrams or assets created or updated, with `Page N: U visual unit(s) → F figure(s)` for each page whose figures changed;
 - useful old/new comparison, when applicable;
 - validation status;
 - unresolved uncertainty or a material rendering limitation.

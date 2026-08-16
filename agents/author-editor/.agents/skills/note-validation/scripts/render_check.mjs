@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
@@ -13,7 +13,7 @@ const mimeTypes = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/j
 
 function usage(exitCode = 0) {
   const stream = exitCode === 0 ? process.stdout : process.stderr;
-  stream.write("Usage: render_check.mjs --vault <root> --note <vault-relative-note.md> [--region <heading>] [--source <vault-relative-image>] [--out <directory>]\n");
+  stream.write("Usage: render_check.mjs --vault <root> --note <note.md> [--region <heading>] [--source <image>] [--out <directory>]\nNote and source paths may be vault-relative or absolute inside the vault.\n");
   process.exit(exitCode);
 }
 
@@ -34,8 +34,9 @@ function parseArgs(argv) {
 }
 
 function resolveInside(root, requestedPath) {
-  if (!requestedPath || isAbsolute(requestedPath)) throw new Error(`Expected vault-relative path: ${requestedPath}`);
-  const absolute = resolve(root, requestedPath.split(/[?#]/, 1)[0]);
+  if (!requestedPath) throw new Error("Expected a path inside the vault.");
+  const cleaned = requestedPath.split(/[?#]/, 1)[0];
+  const absolute = isAbsolute(cleaned) ? resolve(cleaned) : resolve(root, cleaned);
   if (!absolute.startsWith(`${root}${sep}`)) throw new Error(`Path escapes vault: ${requestedPath}`);
   if (existsSync(absolute) && !realpathSync(absolute).startsWith(`${root}${sep}`)) throw new Error(`Symlink escapes vault: ${requestedPath}`);
   return absolute;
@@ -60,6 +61,26 @@ export function sliceRegion(markdown, region) {
     }
   }
   return lines.slice(start, end).join("\n");
+}
+
+/** Obsidian resolves a bare embed name anywhere in the vault, the same way readVaultAsset does. */
+function resolveFigure(vaultRoot, relativePath) {
+  const direct = resolveInside(vaultRoot, relativePath);
+  if (existsSync(direct)) return direct;
+  if (relativePath.includes("/")) throw new Error(`Figure not found: ${relativePath}`);
+  const wanted = relativePath.toLowerCase();
+  const matches = [];
+  const queue = [vaultRoot];
+  while (queue.length > 0 && matches.length < 2) {
+    for (const entry of readdirSync(queue.pop(), { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      const absolute = join(entry.parentPath, entry.name);
+      if (entry.isDirectory()) queue.push(absolute);
+      else if (entry.name.toLowerCase() === wanted) matches.push(absolute);
+    }
+  }
+  if (matches.length !== 1) throw new Error(matches.length ? `Ambiguous figure name: ${relativePath}` : `Figure not found: ${relativePath}`);
+  return matches[0];
 }
 
 function dataUri(absolute) {
@@ -87,8 +108,7 @@ function inlineEmbeds(html, vaultRoot, sanitizeVaultSvg, parseEmbedDimensions) {
     const style = dimensions ? `width:${dimensions.width}px;${dimensions.height ? `height:${dimensions.height}px;` : ""}max-width:100%` : "max-width:100%";
     let absolute;
     try {
-      absolute = resolveInside(vaultRoot, decoded);
-      if (!existsSync(absolute)) throw new Error("missing");
+      absolute = resolveFigure(vaultRoot, decoded);
     } catch {
       return `<span class="figure" data-figure="${decoded}" data-missing="1">Figure unavailable · ${alt}</span>`;
     }
