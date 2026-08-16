@@ -122,6 +122,7 @@ export type AgentStreamEvent = {
 
 export type VioletBridge = {
   appInfo(): Promise<{ version: string; platform: string }>;
+  copyText(text: string): Promise<{ copied: boolean }>;
   getState(): Promise<AppState>;
   saveState(state: AppState): Promise<void>;
   chooseVault(): Promise<{ vaultPath: string; vaultName: string; notes: Note[] } | null>;

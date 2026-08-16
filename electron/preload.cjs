@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("violet", {
   appInfo: () => ipcRenderer.invoke("app:info"),
+  copyText: (text) => ipcRenderer.invoke("app:copy-text", text),
   getState: () => ipcRenderer.invoke("state:get"),
   saveState: (state) => ipcRenderer.invoke("state:save", state),
   chooseVault: () => ipcRenderer.invoke("vault:choose"),

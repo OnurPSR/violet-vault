@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, session } from "electron";
 import { spawn } from "node:child_process";
 import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { constants as fsConstants, watch } from "node:fs";
@@ -583,6 +583,11 @@ async function startTerminalSession(request, sender, dimensions = {}, requestedC
 
 function registerHandlers() {
   ipcMain.handle("app:info", () => ({ version: app.getVersion(), platform: process.platform }));
+  ipcMain.handle("app:copy-text", (_, value) => {
+    if (typeof value !== "string") throw new Error("Clipboard content must be text.");
+    clipboard.writeText(value);
+    return { copied: clipboard.readText() === value };
+  });
   ipcMain.handle("state:get", () => readState());
   ipcMain.handle("state:save", (_, value) => saveState(value));
   ipcMain.handle("vault:choose", async () => {

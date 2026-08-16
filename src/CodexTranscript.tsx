@@ -1,7 +1,8 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
-import { Clock3, Command } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { Check, Clock3, Command, Copy } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { selectedOrAllTerminalText } from "./terminal-copy";
 import TokenUsageSummary from "./TokenUsageSummary";
 import type { TokenUsage } from "./types";
 
@@ -12,6 +13,21 @@ type Props = {
 
 export default function CodexTranscript({ transcript, tokenUsage }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const copyTimer = useRef<number | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function copyOutput() {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const text = selectedOrAllTerminalText(terminal);
+    if (!text) return;
+    const result = await window.violet.copyText(text);
+    if (!result.copied) throw new Error("The terminal output could not be copied.");
+    setCopied(true);
+    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
+  }
 
   useEffect(() => {
     if (!host.current) return;
@@ -49,8 +65,16 @@ export default function CodexTranscript({ transcript, tokenUsage }: Props) {
       },
     });
     const fit = new FitAddon();
+    terminalRef.current = terminal;
     terminal.loadAddon(fit);
     terminal.open(host.current);
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type === "keydown" && (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "c") {
+        void copyOutput();
+        return false;
+      }
+      return true;
+    });
 
     const fitTerminal = () => {
       try { fit.fit(); } catch { /* Layout can race disposal. */ }
@@ -63,6 +87,8 @@ export default function CodexTranscript({ transcript, tokenUsage }: Props) {
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+      terminalRef.current = null;
       terminal.dispose();
     };
   }, [transcript]);
@@ -75,7 +101,10 @@ export default function CodexTranscript({ transcript, tokenUsage }: Props) {
           <span><Command size={14} /></span>
           <div><strong>Codex CLI</strong><small>Saved terminal session</small></div>
         </div>
-        <span className="transcript-status"><Clock3 size={13} />History</span>
+        <div className="terminal-actions transcript-actions">
+          <span className="transcript-status"><Clock3 size={13} />History</span>
+          <button onClick={() => void copyOutput()} title="Copy selection, or all output when nothing is selected">{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copied" : "Copy"}</button>
+        </div>
       </header>
       <div className="terminal-stage"><div className="terminal-host" ref={host} /></div>
       <footer className="terminal-footer transcript-footer">

@@ -1,8 +1,9 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { CircleStop, Command, Paperclip, X } from "lucide-react";
+import { Check, CircleStop, Command, Copy, Paperclip, X } from "lucide-react";
 import { type DragEvent, useEffect, useRef, useState } from "react";
+import { selectedOrAllTerminalText } from "./terminal-copy";
 import type { RunRequest, TerminalExitEvent } from "./types";
 
 type Props = {
@@ -21,6 +22,20 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
   const exited = useRef(false);
   const [status, setStatus] = useState<"starting" | "live" | "exited">("starting");
   const [dragging, setDragging] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+
+  async function copyOutput() {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const text = selectedOrAllTerminalText(terminal);
+    if (!text) return;
+    const result = await window.violet.copyText(text);
+    if (!result.copied) throw new Error("The terminal output could not be copied.");
+    setCopied(true);
+    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
+  }
 
   useEffect(() => {
     if (!host.current) return;
@@ -66,6 +81,13 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host.current);
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type === "keydown" && (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "c") {
+        void copyOutput();
+        return false;
+      }
+      return true;
+    });
 
     const fitTerminal = () => {
       try {
@@ -124,6 +146,7 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
       removeData();
       removeExit();
       if (sessionId.current && !exited.current) void window.violet.closeTerminal(sessionId.current);
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
       terminalRef.current = null;
       terminal.dispose();
     };
@@ -170,6 +193,7 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
         </div>
         <div className="terminal-actions">
           {status !== "live" && <span className={`terminal-live-state ${status}`}><i />{status === "starting" ? "Starting" : "Session ended"}</span>}
+          <button onClick={() => void copyOutput()} title="Copy selection, or all output when nothing is selected">{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copied" : "Copy"}</button>
           <button onClick={() => void attachImages()} disabled={status !== "live"} title="Attach an image to the Codex composer"><Paperclip size={14} />Attach</button>
           <button onClick={() => void interrupt()} disabled={status !== "live"} title="Send Ctrl+C to Codex"><CircleStop size={14} />Interrupt</button>
           <button className="terminal-close" onClick={() => void close()} title="Close terminal"><X size={15} /></button>
