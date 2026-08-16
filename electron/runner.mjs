@@ -73,12 +73,24 @@ export function buildUserPrompt(request) {
   return `${request.prompt.trim()}${selectedTarget}\n\n${request.notePath}`;
 }
 
+/**
+ * Earlier messages are replayed on every run, so a long completion report would be resent in
+ * full each time. Keep the opening of each message, which carries the request or its outcome.
+ */
+function buildTranscript(request) {
+  return (request.messages ?? [])
+    .slice(-20)
+    .map((message) => {
+      const role = message.role === "assistant" ? "Assistant" : "User";
+      const content = String(message.content ?? "");
+      return `${role}: ${content.length > 2_000 ? `${content.slice(0, 2_000)}… [truncated]` : content}`;
+    })
+    .join("\n\n");
+}
+
 export function buildTaskPrompt(request) {
   assertRequest(request);
-  const transcript = (request.messages ?? [])
-    .slice(-20)
-    .map((message) => `${message.role === "assistant" ? "Assistant" : "User"}: ${message.content}`)
-    .join("\n\n");
+  const transcript = buildTranscript(request);
   const imageList = (request.images ?? []).map((item) => `- ${item}`).join("\n") || "- None";
 
   return `# Runtime context\n\nVault root: ${request.vaultPath}\nAttached source images:\n${imageList}${buildWriteAuthorization(request)}\n\n# Conversation context\n\n${transcript || "No earlier messages in this conversation."}\n\n# Current user request\n\n${buildUserPrompt(request)}`;
@@ -86,10 +98,7 @@ export function buildTaskPrompt(request) {
 
 export function buildInteractiveInstructions(request, agentInstructions) {
   assertRequest(request);
-  const transcript = (request.messages ?? [])
-    .slice(-20)
-    .map((message) => `${message.role === "assistant" ? "Assistant" : "User"}: ${message.content}`)
-    .join("\n\n");
+  const transcript = buildTranscript(request);
 
   return `${agentInstructions}${buildVisualVerificationSetting(request)}\n\n# Violet Vault runtime context\n\nVault root: ${request.vaultPath}${buildWriteAuthorization(request)}\n\nEarlier Violet Vault conversation:\n${transcript || "No earlier messages in this conversation."}`;
 }

@@ -179,3 +179,18 @@ test("task prompt preserves conversation and target note without extra behaviora
 test("unsupported model values are rejected before process launch", () => {
   assert.throws(() => buildInvocation({ ...base, model: "injected-model" }, "contract"), /Unsupported model/);
 });
+
+test("replayed conversation keeps short messages intact and truncates long ones", () => {
+  const request = {
+    ...base,
+    messages: [
+      { role: "user", content: "Rewrite page 13" },
+      { role: "assistant", content: `${"report ".repeat(500)}tail` },
+    ],
+  };
+  const prompt = buildTaskPrompt(request);
+  assert.match(prompt, /User: Rewrite page 13/);
+  assert.match(prompt, /… \[truncated\]/);
+  assert.ok(!prompt.includes("report tail"), "the truncated tail is not replayed");
+  assert.ok(prompt.length < 4_000, `expected a bounded transcript, got ${prompt.length}`);
+});
