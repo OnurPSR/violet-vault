@@ -1,17 +1,16 @@
 <div align="center">
   <img src="build/logo-horse-refined.png" alt="Violet Vault logo" width="180" />
   <h1>Violet Vault</h1>
-  <p><strong>A local desktop workspace for AI agents that operate within safe boundaries inside your Obsidian vault.</strong></p>
+  <p><strong>A local desktop workspace for AI agents that operate inside your Obsidian vault.</strong></p>
 </div>
 
-Handwriting is one of the most effective ways to make ideas stick. Digital note-taking, on the other hand, gives us structure, searchability, and easy organization—but when our notes are reduced to copying and pasting, we often retain very little of what we save. What if we could keep the cognitive benefits of writing by hand without giving up the organization of a digital knowledge base?
+Handwriting is one of the most effective ways to make ideas stick. Digital note-taking, on the other hand, gives us structure, searchability, and easy organization but when our notes are reduced to copying and pasting, we often retain very little of what we save. What if we could keep the cognitive benefits of writing by hand without giving up the organization of a digital knowledge base?
 
 Violet Vault brings these two approaches together. Its context-aware OCR pipeline transforms handwritten pages into structured Obsidian notes while preserving their meaning, formulas, diagrams, and relationships. The result is a more memorable way to capture ideas and a more organized way to store, retrieve, and develop them over time.
 
 Violet Vault is a local Electron application for searching, explaining, and editing those notes. The React interface, filesystem access, conversation history, and Codex or Claude CLI processes all run on your computer; no hosted service or project database is required.
 
-> [!IMPORTANT]
-> The Author–Editor can modify files in your vault. Keep important vaults under version control or back them up regularly. Violet Vault reports out-of-scope changes but does not revert them automatically.
+
 
 ## Features
 
