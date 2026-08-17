@@ -9,9 +9,10 @@ import type { TokenUsage } from "./types";
 type Props = {
   transcript: string;
   tokenUsage?: TokenUsage | null;
+  cli?: string;
 };
 
-export default function CodexTranscript({ transcript, tokenUsage }: Props) {
+export default function CodexTranscript({ transcript, tokenUsage, cli = "Codex CLI" }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const copyTimer = useRef<number | null>(null);
@@ -94,12 +95,12 @@ export default function CodexTranscript({ transcript, tokenUsage }: Props) {
   }, [transcript]);
 
   return (
-    <section className="codex-terminal-shell transcript-shell" aria-label="Saved Codex terminal transcript">
+    <section className="codex-terminal-shell transcript-shell" aria-label={`Saved ${cli} terminal transcript`}>
       <header className="terminal-chrome">
         <div className="terminal-lights archived" aria-hidden="true"><i /><i /><i /></div>
         <div className="terminal-identity">
           <span><Command size={14} /></span>
-          <div><strong>Codex CLI</strong><small>Saved terminal session</small></div>
+          <div><strong>{cli}</strong><small>Saved terminal session</small></div>
         </div>
         <div className="terminal-actions transcript-actions">
           <span className="transcript-status"><Clock3 size={13} />History</span>

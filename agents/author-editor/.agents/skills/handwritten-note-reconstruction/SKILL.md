@@ -9,12 +9,11 @@ Apply the author-editor role contract first. Use this skill only for the reconst
 
 ## Load the references
 
-Read these before reconstructing any page:
+Read [page-mapping.md](references/page-mapping.md) for source capture, page order, scale, coordinates, page numbering, and source-image placement, then build the page map before reading anything else.
 
-- [page-mapping.md](references/page-mapping.md) for source capture, page order, scale, coordinates, page numbering, and source-image placement.
-- [visual-transfer.md](references/visual-transfer.md) for facsimile-versus-intuitive formatting, prominence, grouping, and attached text.
+Read [visual-transfer.md](references/visual-transfer.md) for facsimile-versus-intuitive formatting, prominence, grouping, and attached text.
 
-Then read only the renderer references needed by the source:
+Read a renderer reference only once the page map assigns that renderer to a unit:
 
 - [excalidraw.md](references/excalidraw.md) before creating or changing an Excalidraw figure.
 - [mermaid.md](references/mermaid.md) before writing a Mermaid block.

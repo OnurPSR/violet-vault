@@ -24,6 +24,7 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
   const [dragging, setDragging] = useState(false);
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<number | null>(null);
+  const cli = request.provider === "claude" ? "Claude CLI" : "Codex CLI";
 
   async function copyOutput() {
     const terminal = terminalRef.current;
@@ -133,7 +134,7 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
           if (cancelled) return;
           exited.current = true;
           setStatus("exited");
-          onError(cause instanceof Error ? cause : new Error("Unable to start the Codex terminal."));
+          onError(cause instanceof Error ? cause : new Error("Unable to start the terminal session."));
         });
     }, 0);
 
@@ -184,18 +185,18 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
   }
 
   return (
-    <section className="codex-terminal-shell live-terminal-shell" aria-label="Codex CLI">
+    <section className="codex-terminal-shell live-terminal-shell" aria-label={cli}>
       <header className="terminal-chrome">
         <div className="terminal-lights" aria-hidden="true"><i /><i /><i /></div>
         <div className="terminal-identity">
           <span><Command size={14} /></span>
-          <div><strong>Codex CLI</strong></div>
+          <div><strong>{cli}</strong></div>
         </div>
         <div className="terminal-actions">
           {status !== "live" && <span className={`terminal-live-state ${status}`}><i />{status === "starting" ? "Starting" : "Session ended"}</span>}
           <button onClick={() => void copyOutput()} title="Copy selection, or all output when nothing is selected">{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copied" : "Copy"}</button>
-          <button onClick={() => void attachImages()} disabled={status !== "live"} title="Attach an image to the Codex composer"><Paperclip size={14} />Attach</button>
-          <button onClick={() => void interrupt()} disabled={status !== "live"} title="Send Ctrl+C to Codex"><CircleStop size={14} />Interrupt</button>
+          <button onClick={() => void attachImages()} disabled={status !== "live"} title={`Attach an image to the ${cli} composer`}><Paperclip size={14} />Attach</button>
+          <button onClick={() => void interrupt()} disabled={status !== "live"} title={`Send Ctrl+C to ${cli}`}><CircleStop size={14} />Interrupt</button>
           <button className="terminal-close" onClick={() => void close()} title="Close terminal"><X size={15} /></button>
         </div>
       </header>
@@ -207,7 +208,7 @@ export default function CodexTerminal({ request, onStarted, onData, onExit, onEr
         onDrop={dropImages}
       >
         <div className="terminal-host" ref={host} />
-        {dragging && <div className="terminal-drop-overlay"><Paperclip size={22} /><strong>Drop images into the Codex prompt</strong></div>}
+        {dragging && <div className="terminal-drop-overlay"><Paperclip size={22} /><strong>Drop images into the {cli} prompt</strong></div>}
       </div>
     </section>
   );

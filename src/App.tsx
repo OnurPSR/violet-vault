@@ -41,8 +41,8 @@ type FolderEntry = { name: string; path: string; noteCount: number };
 type SelectedFigure = { path: string; alt: string; dataUrl: string };
 
 const AGENTS = [
-  { id: "retriever" as AgentId, name: "Note Retriever", mode: "Read only", text: "Understand the note, retrieve what it says, and keep note evidence separate from explanation.", icon: Search, color: "#8b7cff" },
-  { id: "author-editor" as AgentId, name: "Note Author–Editor", mode: "Author + edit", text: "Append, reconstruct, insert, or make scoped edits in a selected vault note.", icon: SquarePen, color: "#b06cff" },
+  { id: "retriever" as AgentId, name: "Librarian", mode: "Read only", text: "Understand the note, retrieve what it says, and keep note evidence separate from explanation.", icon: Search, color: "#8b7cff" },
+  { id: "author-editor" as AgentId, name: "Scribe", mode: "Author + edit", text: "Append, reconstruct, insert, or make scoped edits in a selected vault note.", icon: SquarePen, color: "#b06cff" },
 ];
 
 const PROVIDERS: Record<ProviderId, Provider> = {
@@ -63,7 +63,6 @@ const PROVIDERS: Record<ProviderId, Provider> = {
       { label: "Claude Sonnet 5", value: "claude-sonnet-5" },
     ],
   },
-  local: { label: "Local LLM", models: [{ label: "Coming later", value: "coming-later" }] },
 };
 
 const SUGGESTIONS: Record<AgentId, string[]> = {
@@ -544,7 +543,7 @@ export default function App() {
     setModel(validModel(chat.provider, chat.model));
     setEffort(chat.effort);
     setMessages(chat.messages);
-    setTerminalReplay(chat.provider === "codex" && chat.terminalTranscript ? chat.terminalTranscript : null);
+    setTerminalReplay(chat.terminalTranscript ? chat.terminalTranscript : null);
     setTerminalTokenUsage(chat.terminalTokenUsage ?? null);
     setEditing(null);
     setError(null);
@@ -604,7 +603,6 @@ export default function App() {
       return;
     }
     if (!vaultPath) return setError("Select an Obsidian vault before running an agent.");
-    if (provider === "local") return setError("Local LLM support is display-only for now.");
     if (!cliStatus?.[provider].installed) return setError(`${PROVIDERS[provider].label} is not installed or is not available on PATH.`);
     if (agentId === "author-editor" && images.length > 0 && !note) {
       return setError("Select the target note before sending handwritten pages.");
@@ -614,7 +612,7 @@ export default function App() {
       ? buildEditContext(note.content, selectedText, agentId === "author-editor" ? selectedFigure : null)
       : undefined;
 
-    if (provider === "codex" && agentId !== "retriever") {
+    if (agentId !== "retriever") {
       const runChatId = chatId ?? uid();
       const userMessage: Message = { id: uid(), role: "user", content: text || "Reconstruct attached handwritten pages", createdAt: Date.now() };
       const staged = [...messages, userMessage];
@@ -908,11 +906,10 @@ export default function App() {
     }
   }
 
-  const activeCli = provider === "local" ? null : cliStatus?.[provider];
+  const activeCli = cliStatus?.[provider];
   const canSend = Boolean(
     (prompt.trim() || (agentId === "author-editor" && images.length > 0 && note))
     && vaultPath
-    && provider !== "local"
     && activeCli?.installed,
   );
   const sessionLocked = running || Boolean(terminalRequest) || Boolean(terminalReplay);
@@ -1008,8 +1005,8 @@ export default function App() {
           </button>
           <div className="model-controls" aria-label="Model settings">
             <SelectMenu label="Provider" className="provider-select" value={provider} disabled={sessionLocked} options={Object.entries(PROVIDERS).map(([value, item]) => ({ value, label: item.label }))} onChange={(value) => chooseProvider(value as ProviderId)} />
-            <SelectMenu label="Model" className="model-select" value={model} disabled={sessionLocked || provider === "local"} options={PROVIDERS[provider].models} onChange={setModel} />
-            <SelectMenu label="Reasoning" className="effort-select" value={effort} disabled={sessionLocked || provider === "local"} options={[{ value: "high", label: "High" }, { value: "medium", label: "Medium" }, { value: "low", label: "Low" }]} onChange={(value) => setEffort(value as Effort)} />
+            <SelectMenu label="Model" className="model-select" value={model} disabled={sessionLocked} options={PROVIDERS[provider].models} onChange={setModel} />
+            <SelectMenu label="Reasoning" className="effort-select" value={effort} disabled={sessionLocked} options={[{ value: "high", label: "High" }, { value: "medium", label: "Medium" }, { value: "low", label: "Low" }]} onChange={(value) => setEffort(value as Effort)} />
           </div>
           <button className="icon-button panel-toggle right-panel-toggle" onClick={() => setRightPanelOpen((open) => !open)} title={`${rightPanelOpen ? "Hide" : "Show"} context sidebar`} aria-label={`${rightPanelOpen ? "Hide" : "Show"} context sidebar`}>
             {rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
@@ -1040,7 +1037,7 @@ export default function App() {
               {noteViewer}
             </div>
           ) : terminalReplay ? (
-            <div className={`terminal-workspace ${noteViewer ? "with-note" : ""}`}><CodexTranscript transcript={terminalReplay} tokenUsage={terminalTokenUsage} />{noteViewer}</div>
+            <div className={`terminal-workspace ${noteViewer ? "with-note" : ""}`}><CodexTranscript transcript={terminalReplay} tokenUsage={terminalTokenUsage} cli={PROVIDERS[provider].label} />{noteViewer}</div>
           ) : messages.length === 0 && !noteInChat ? (
             <div className="empty-state">
               <div className="empty-orb"><Sparkles size={24} /></div>
@@ -1123,7 +1120,7 @@ export default function App() {
                 <div className="send-area">{running ? <button className="send-button stop" onClick={() => void stop()} title="Stop agent"><CircleStop size={17} /></button> : <button className="send-button" onClick={() => void send()} disabled={editing ? !prompt.trim() : !canSend} title={canSend || editing ? "Send" : "Select a vault and install the selected CLI"}><Send size={17} /></button>}</div>
               </div>
             </div>
-            <p className="composer-hint">{agentId === "retriever" ? note ? "Retriever will start with the selected note and keep the vault read-only." : "Retriever starts in read-only mode." : "Writes start vault-scoped; Codex will surface any approval it needs inside the terminal."}</p>
+            <p className="composer-hint">{agentId === "retriever" ? note ? "Retriever will start with the selected note and keep the vault read-only." : "Retriever starts in read-only mode." : `Writes start vault-scoped; ${PROVIDERS[provider].label} will surface any approval it needs inside the terminal.`}</p>
           </div>
         )}
       </section>

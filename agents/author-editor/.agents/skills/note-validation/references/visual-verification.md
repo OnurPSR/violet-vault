@@ -12,13 +12,16 @@ For every figure created or regenerated during the task:
    column overflow, and LaTeX errors.
 3. Open the comparison image only once the report is clean, then compare content,
    labels, formulas, connectors, and placement against the source.
-4. Correct material errors and rerun once.
+4. Correct material errors and rerun at most once. A difference is material only
+   when the figure omits source content, adds content the source lacks, or
+   misreads it. Equivalent notation, spacing, font weight, and color are not.
+   Once the report and the comparison are clean, stop editing.
 
 Render only through that script. Do not open the vault in Obsidian or another
 application, and do not start a browser session or debugging port to obtain a
 rendering. The harness renders Markdown, LaTeX, Mermaid, and figure embeds;
 Obsidian callout chrome is not reproduced and is not a defect.
 
-Do not iterate over cosmetic differences. Use `PASS` only after direct rendered
-inspection, `FAIL` when a material discrepancy remains, and `INCOMPLETE` when
-the source or rendering is unavailable. Static inspection is not a substitute.
+Use `PASS` only after direct rendered inspection, `FAIL` when a material
+discrepancy remains, and `INCOMPLETE` when the source or rendering is
+unavailable. Static inspection is not a substitute.

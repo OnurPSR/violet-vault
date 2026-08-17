@@ -52,20 +52,26 @@ export function parseClaudeRunOutput(stdout) {
 }
 
 function parseCompactNumber(value) {
-  const normalized = value.replaceAll(",", "").trim().toLowerCase();
+  const normalized = value.replace(/[\s,]/g, "").toLowerCase();
   const match = /^(\d+(?:\.\d+)?)([km])?$/.exec(normalized);
   if (!match) return null;
   const multiplier = match[2] === "k" ? 1_000 : match[2] === "m" ? 1_000_000 : 1;
   return Math.round(Number(match[1]) * multiplier);
 }
 
-export function extractTerminalTokenUsage(transcript) {
+export function extractTerminalTokenUsage(transcript, provider = "codex") {
   const clean = String(transcript)
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .slice(-16_000);
-  const relevant = clean.split(/\r?\n/).filter((line) => /token|usage/i.test(line)).slice(-20).join("\n");
+  const relevant = clean.split(/\r?\n/).filter((line) => /token|usage|context window/i.test(line)).slice(-20).join("\n");
   if (!relevant) return null;
+  let contextWindow = null;
+  let contextUsed = 0;
+  for (const match of relevant.matchAll(/([\d,.]+\s*[kKmM]?)\s*used\s*\/\s*([\d,.]+\s*[kKmM]?)/g)) {
+    contextUsed = parseCompactNumber(match[1]) ?? contextUsed;
+    contextWindow = parseCompactNumber(match[2]) ?? contextWindow;
+  }
   const read = (labels) => {
     const expression = new RegExp(`(?:${labels})\\s*(?:tokens?)?\\s*[:=]\\s*([\\d,.]+\\s*[kKmM]?)`, "gi");
     let value = null;
@@ -78,15 +84,16 @@ export function extractTerminalTokenUsage(transcript) {
   const reasoningOutputTokens = read("reasoning(?: output)?");
   let totalTokens = read("total|tokens used|token usage");
   if (!totalTokens) totalTokens = inputTokens + outputTokens;
+  if (!totalTokens) totalTokens = contextUsed;
   if (!totalTokens) return null;
   return {
-    provider: "codex",
+    provider,
     totalTokens,
     inputTokens,
     cachedInputTokens,
     cacheWriteInputTokens: 0,
     outputTokens,
     reasoningOutputTokens,
-    modelContextWindow: null,
+    modelContextWindow: contextWindow,
   };
 }

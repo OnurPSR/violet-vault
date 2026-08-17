@@ -121,14 +121,29 @@ test("interactive Codex write agents remain bounded to workspace-write", () => {
 });
 
 test("visual verification defaults on and reaches Claude as a trusted runtime setting", () => {
-  const invocation = buildInvocation({
+  const invocation = buildInteractiveInvocation({
     ...base,
     agentId: "author-editor",
     provider: "claude",
     model: "claude-opus-5",
   }, "author-editor contract");
   assert.match(invocation.args[invocation.args.indexOf("--append-system-prompt") + 1], /Visual verification: on/);
-  assert.doesNotMatch(invocation.prompt, /Visual verification:/);
+  assert.doesNotMatch(invocation.args.at(-1), /Visual verification:/);
+});
+
+test("interactive Claude write agents run in the terminal with the same authorization contract", () => {
+  const invocation = buildInteractiveInvocation({
+    ...base,
+    agentId: "author-editor",
+    provider: "claude",
+    model: "claude-opus-5",
+  }, "author-editor contract");
+  assert.equal(invocation.binary, "claude");
+  assert.equal(invocation.args[invocation.args.indexOf("--permission-mode") + 1], "auto");
+  assert.ok(!invocation.args.includes("bypassPermissions"));
+  assert.equal(invocation.args.at(-1), buildUserPrompt({ ...base, agentId: "author-editor" }));
+  assert.match(invocation.developerInstructions, /# Write authorization/);
+  assert.match(invocation.developerInstructions, /Treat every other vault path as read-only/);
 });
 
 test("Codex retriever uses the streaming app-server in read-only mode", () => {
@@ -143,8 +158,12 @@ test("Codex retriever uses the streaming app-server in read-only mode", () => {
   assert.deepEqual(invocation.turnStart.input[1], { type: "localImage", path: "/tmp/page-1.png" });
 });
 
-test("non-interactive Codex write agents are rejected", () => {
+test("non-interactive write agents are rejected for either CLI", () => {
   assert.throws(() => buildInvocation({ ...base, agentId: "author-editor" }, "contract"), /interactive terminal/);
+  assert.throws(
+    () => buildInvocation({ ...base, agentId: "author-editor", provider: "claude", model: "claude-opus-5" }, "contract"),
+    /interactive terminal/,
+  );
 });
 
 test("removed Supervisor role is rejected", () => {

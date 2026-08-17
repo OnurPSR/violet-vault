@@ -250,7 +250,7 @@ async function scopeWarning(request, before) {
 function requestedBinary(request) {
   if (request.provider === "codex") return "codex";
   if (request.provider === "claude") return "claude";
-  throw new Error("Local LLM support is display-only for now.");
+  throw new Error("Unsupported CLI provider.");
 }
 
 function executableCandidates(name) {
@@ -491,17 +491,18 @@ function terminalSize(value, fallback, minimum, maximum) {
 }
 
 async function startTerminalSession(request, sender, dimensions = {}, requestedClientSessionId) {
-  if (!request || request.provider !== "codex" || typeof request.vaultPath !== "string") {
-    throw new Error("Select an Obsidian vault and Codex before starting a terminal session.");
+  if (!request || !["codex", "claude"].includes(request.provider) || typeof request.vaultPath !== "string") {
+    throw new Error("Select an Obsidian vault and a CLI provider before starting a terminal session.");
   }
-  if (terminalSessions.has(sender.id)) throw new Error("A Codex terminal session is already running.");
+  if (terminalSessions.has(sender.id)) throw new Error("A terminal session is already running.");
 
   const vault = await scanVault(request.vaultPath);
   const requestWithNote = await validateEditContextRevision(validateSelectedNote(request, vault));
 
   const instructions = await loadAgentInstructions(agentProjectRoot, request.agentId);
-  const binary = await findExecutable(requestedBinary(requestWithNote));
-  if (!binary) throw new Error("Codex CLI was not found. Install it and restart Violet Vault.");
+  const cli = requestedBinary(requestWithNote);
+  const binary = await findExecutable(cli);
+  if (!binary) throw new Error(`${cli} CLI was not found. Install it and restart Violet Vault.`);
   const before = request.agentId === "author-editor" ? await captureVaultManifest(request.vaultPath) : null;
   const staged = await prepareRunImages(requestWithNote);
   try {
@@ -568,7 +569,7 @@ async function startTerminalSession(request, sender, dimensions = {}, requestedC
           sessionId,
           exitCode,
           signal,
-          tokenUsage: extractTerminalTokenUsage(terminalUsageBuffer),
+          tokenUsage: extractTerminalTokenUsage(terminalUsageBuffer, request.provider),
         });
       }
     });

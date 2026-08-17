@@ -38,3 +38,8 @@ yarn-error.log*
 # python caches
 __pycache__/
 *.py[cod]
+
+
+.claude/
+*.obsidian
+

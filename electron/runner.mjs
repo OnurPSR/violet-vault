@@ -7,7 +7,7 @@ const MODEL_IDS = {
 
 function assertRequest(request) {
   if (!request || !AGENT_IDS.has(request.agentId)) throw new Error("Unknown agent selection.");
-  if (!(request.provider in MODEL_IDS)) throw new Error("Local LLM support is display-only for now.");
+  if (!(request.provider in MODEL_IDS)) throw new Error("Unsupported CLI provider.");
   if (!MODEL_IDS[request.provider].has(request.model)) throw new Error("Unsupported model selection.");
   if (!EFFORTS.has(request.effort)) throw new Error("Unsupported reasoning level.");
   if (typeof request.prompt !== "string") throw new Error("The prompt is invalid.");
@@ -105,9 +105,23 @@ export function buildInteractiveInstructions(request, agentInstructions) {
 
 export function buildInteractiveInvocation(request, agentInstructions) {
   assertRequest(request);
-  if (request.provider !== "codex") throw new Error("Interactive terminal sessions are only available for Codex.");
 
   const developerInstructions = buildInteractiveInstructions(request, agentInstructions);
+  if (request.provider === "claude") {
+    const args = [
+      "--model",
+      request.model,
+      "--effort",
+      request.effort,
+      "--permission-mode",
+      request.agentId === "retriever" ? "plan" : "auto",
+      "--append-system-prompt",
+      developerInstructions,
+    ];
+    for (const directory of request.imageDirectories ?? []) args.push("--add-dir", directory);
+    args.push(buildUserPrompt(request));
+    return { binary: "claude", args, developerInstructions };
+  }
   const args = [
     "--cd",
     request.vaultPath,
@@ -129,8 +143,8 @@ export function buildInteractiveInvocation(request, agentInstructions) {
 
 export function buildInvocation(request, agentInstructions) {
   assertRequest(request);
+  if (request.agentId !== "retriever") throw new Error("Write agents must run through the interactive terminal.");
   if (request.provider === "codex") {
-    if (request.agentId !== "retriever") throw new Error("Codex write agents must run through the interactive terminal.");
     const developerInstructions = buildInteractiveInstructions(request, agentInstructions);
     return {
       binary: "codex",

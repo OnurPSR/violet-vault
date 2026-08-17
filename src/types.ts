@@ -1,5 +1,5 @@
 export type AgentId = "retriever" | "author-editor";
-export type ProviderId = "codex" | "claude" | "local";
+export type ProviderId = "codex" | "claude";
 export type Effort = "low" | "medium" | "high";
 
 export type TokenUsage = {
@@ -135,7 +135,7 @@ export type VioletBridge = {
   chooseImages(): Promise<Attachment[]>;
   pathForFile(file: File): string;
   checkCli(): Promise<CliStatus>;
-  runAgent(request: RunRequest): Promise<{ output: string; provider: Exclude<ProviderId, "local">; tokenUsage: TokenUsage | null }>;
+  runAgent(request: RunRequest): Promise<{ output: string; provider: ProviderId; tokenUsage: TokenUsage | null }>;
   stopAgent(): Promise<{ stopped: boolean }>;
   onAgentStream(callback: (event: AgentStreamEvent) => void): () => void;
   startCodexTerminal(request: RunRequest, dimensions: TerminalDimensions, clientSessionId: string): Promise<{ sessionId: string }>;

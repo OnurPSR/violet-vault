@@ -7,6 +7,8 @@ Build two restrained layers:
 - **Faithful core:** retain source order, grouping, emphasis, topology, and attached annotations.
 - **Study scaffold:** add only enough consistent Markdown structure to make the reconstruction navigable.
 
+Transcribe values, labels, and expressions as written. A source arithmetic or notation error is content, not a defect; never adjust one to reach an expected result.
+
 The result should read like an intuitive digital facsimile: recognizably the same page, but aligned and legible rather than imitating every hand-drawn irregularity.
 
 ## Map prominence

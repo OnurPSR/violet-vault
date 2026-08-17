@@ -27,9 +27,9 @@ export default function TokenUsageSummary({ usage, unavailable = false, terminal
 
   const title = [
     `${exactFormatter.format(usage.totalTokens)} total tokens`,
-    `${exactFormatter.format(usage.inputTokens)} input`,
+    usage.inputTokens ? `${exactFormatter.format(usage.inputTokens)} input` : null,
     usage.cachedInputTokens ? `${exactFormatter.format(usage.cachedInputTokens)} cached input` : null,
-    `${exactFormatter.format(usage.outputTokens)} output`,
+    usage.outputTokens ? `${exactFormatter.format(usage.outputTokens)} output` : null,
     usage.reasoningOutputTokens ? `${exactFormatter.format(usage.reasoningOutputTokens)} reasoning output` : null,
   ].filter(Boolean).join(" · ");
 
@@ -37,9 +37,9 @@ export default function TokenUsageSummary({ usage, unavailable = false, terminal
     <div className={`token-usage ${terminal ? "terminal-token-usage" : ""}`} aria-label={title} title={title}>
       <Gauge size={12} aria-hidden="true" />
       <span><strong>{compact(usage.totalTokens)}</strong> tokens</span>
-      <span>{compact(usage.inputTokens)} input</span>
+      {usage.inputTokens > 0 && <span>{compact(usage.inputTokens)} input</span>}
       {usage.cachedInputTokens > 0 && <span>{compact(usage.cachedInputTokens)} cached</span>}
-      <span>{compact(usage.outputTokens)} output</span>
+      {usage.outputTokens > 0 && <span>{compact(usage.outputTokens)} output</span>}
     </div>
   );
 }

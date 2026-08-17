@@ -1,7 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
-const IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".trash"]);
+const IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".trash", ".obsidian"]);
 
 function normalize(relativePath) {
   return relativePath.split(path.sep).join("/").replace(/^\.\//, "");
