@@ -31,7 +31,6 @@ import { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEv
 import CodexTerminal from "./CodexTerminal";
 import CodexTranscript from "./CodexTranscript";
 import RichMessage from "./RichMessage";
-import TokenUsageSummary from "./TokenUsageSummary";
 import type { AgentId, AppState, Attachment, CliStatus, Conversation, Effort, Message, Note, ProviderId, RunRequest, TerminalExitEvent, TokenUsage } from "./types";
 import { buildEditContext } from "./edit-context";
 
@@ -1037,7 +1036,7 @@ export default function App() {
               {noteViewer}
             </div>
           ) : terminalReplay ? (
-            <div className={`terminal-workspace ${noteViewer ? "with-note" : ""}`}><CodexTranscript transcript={terminalReplay} tokenUsage={terminalTokenUsage} cli={PROVIDERS[provider].label} />{noteViewer}</div>
+            <div className={`terminal-workspace ${noteViewer ? "with-note" : ""}`}><CodexTranscript transcript={terminalReplay} cli={PROVIDERS[provider].label} />{noteViewer}</div>
           ) : messages.length === 0 && !noteInChat ? (
             <div className="empty-state">
               <div className="empty-orb"><Sparkles size={24} /></div>
@@ -1055,7 +1054,7 @@ export default function App() {
                   <div className="message-content">
                     <div className="message-meta"><strong>{message.role === "user" ? "You" : agent.name}</strong><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>
                     {message.role === "assistant"
-                      ? <><RichMessage content={message.content} vaultPath={vaultPath} notePath={note?.path} provenanceMode={agentId === "retriever"} selectedFigure={selectedFigure?.path} onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined} /><TokenUsageSummary usage={message.tokenUsage} unavailable={message.tokenUsage === null} /></>
+                      ? <><RichMessage content={message.content} vaultPath={vaultPath} notePath={note?.path} provenanceMode={agentId === "retriever"} selectedFigure={selectedFigure?.path} onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined} /></>
                       : <p>{message.content}</p>}
                   </div>
                   {message.role === "user" && <button className="message-edit" disabled={running} onClick={() => { setEditing(message.id); setPrompt(message.content); }} title="Edit question"><Pencil size={14} /></button>}

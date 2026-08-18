@@ -3,16 +3,13 @@ import { Terminal } from "@xterm/xterm";
 import { Check, Clock3, Command, Copy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { selectedOrAllTerminalText } from "./terminal-copy";
-import TokenUsageSummary from "./TokenUsageSummary";
-import type { TokenUsage } from "./types";
 
 type Props = {
   transcript: string;
-  tokenUsage?: TokenUsage | null;
   cli?: string;
 };
 
-export default function CodexTranscript({ transcript, tokenUsage, cli = "Codex CLI" }: Props) {
+export default function CodexTranscript({ transcript, cli = "Codex CLI" }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const copyTimer = useRef<number | null>(null);
@@ -110,7 +107,6 @@ export default function CodexTranscript({ transcript, tokenUsage, cli = "Codex C
       <div className="terminal-stage"><div className="terminal-host" ref={host} /></div>
       <footer className="terminal-footer transcript-footer">
         <span>Read-only terminal transcript</span>
-        <TokenUsageSummary usage={tokenUsage} unavailable terminal />
       </footer>
     </section>
   );
