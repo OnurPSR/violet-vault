@@ -5,6 +5,7 @@ import {
   ChevronRight,
   CircleStop,
   Clock3,
+  Columns2,
   FileText,
   Folder,
   FolderOpen,
@@ -30,7 +31,9 @@ import {
 import { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import CodexTerminal from "./CodexTerminal";
 import CodexTranscript from "./CodexTranscript";
+import PageComparison from "./PageComparison";
 import RichMessage from "./RichMessage";
+import { extractComparisonPages } from "./page-comparison";
 import type { AgentId, AppState, Attachment, CliStatus, Conversation, Effort, Message, Note, ProviderId, RunRequest, TerminalExitEvent, TokenUsage } from "./types";
 import { buildEditContext } from "./edit-context";
 
@@ -249,6 +252,7 @@ export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [note, setNote] = useState<Note | null>(null);
   const [noteInChat, setNoteInChat] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [selectedText, setSelectedText] = useState("");
   const [selectedFigure, setSelectedFigure] = useState<SelectedFigure | null>(null);
   const [noteRevision, setNoteRevision] = useState(0);
@@ -286,6 +290,8 @@ export default function App() {
     () => notes.filter((item) => item.path.toLowerCase().includes(query.toLowerCase())).slice(0, 500),
     [notes, query],
   );
+  const comparisonPages = useMemo(() => extractComparisonPages(note?.content, note?.path), [note?.content, note?.path]);
+  const compareActive = Boolean(compareOpen && note && comparisonPages);
   const folderView = useMemo(() => {
     const prefix = folderPath ? `${folderPath}/` : "";
     const folders = new Map<string, FolderEntry>();
@@ -526,6 +532,7 @@ export default function App() {
     setPrompt("");
     setImages([]);
     setNoteInChat(false);
+    setCompareOpen(false);
     setSelectedText("");
     setSelectedFigure(null);
     setEditing(null);
@@ -818,6 +825,7 @@ export default function App() {
       setNotes(selected.notes);
       setNote(null);
       setNoteInChat(false);
+      setCompareOpen(false);
       setSelectedText("");
       setSelectedFigure(null);
       resetFolderNavigation();
@@ -833,6 +841,7 @@ export default function App() {
       setNote({ ...selected, content: result.content });
       setSelectedContextOpen(true);
       setNoteInChat(false);
+      setCompareOpen(false);
       setSelectedText("");
       setSelectedFigure(null);
       setError(null);
@@ -844,9 +853,26 @@ export default function App() {
   function toggleNoteView() {
     setNoteInChat((open) => {
       const next = !open;
-      if (next && !terminalRequest && !terminalReplay) {
-        stickToBottom.current = false;
-        requestAnimationFrame(() => scrollArea.current?.scrollTo({ top: 0, behavior: "smooth" }));
+      if (next) {
+        setCompareOpen(false);
+        if (!terminalRequest && !terminalReplay) {
+          stickToBottom.current = false;
+          requestAnimationFrame(() => scrollArea.current?.scrollTo({ top: 0, behavior: "smooth" }));
+        }
+      }
+      return next;
+    });
+  }
+
+  function toggleCompareView() {
+    setCompareOpen((open) => {
+      const next = !open;
+      if (next) {
+        setNoteInChat(false);
+        if (!terminalRequest && !terminalReplay) {
+          stickToBottom.current = false;
+          requestAnimationFrame(() => scrollArea.current?.scrollTo({ top: 0, behavior: "smooth" }));
+        }
       }
       return next;
     });
@@ -923,7 +949,10 @@ export default function App() {
     <article className={`note-in-chat ${terminalRequest || terminalReplay ? "terminal-note-pane" : ""}`}>
       <header>
         <div><FileText size={16} /><span><strong>{note.name}</strong><small>{note.path} · Rendered view</small></span></div>
-        <button onClick={() => setNoteInChat(false)} title="Close note view" aria-label="Close note view"><X size={15} /></button>
+        <div className="note-in-chat-actions">
+          {comparisonPages && <button onClick={toggleCompareView} title="Compare source vs rendered" aria-label="Compare source vs rendered"><Columns2 size={15} /></button>}
+          <button onClick={() => setNoteInChat(false)} title="Close note view" aria-label="Close note view"><X size={15} /></button>
+        </div>
       </header>
       <div className="note-rendered">
         <RichMessage
@@ -940,6 +969,24 @@ export default function App() {
       <footer>{agentId === "author-editor" ? "Select text or click a figure to scope the next edit." : "Highlight text to ask about that passage."}</footer>
     </article>
   ) : null;
+
+  const comparisonViewer = compareActive && note && comparisonPages ? (
+    <div className={terminalRequest || terminalReplay ? "terminal-note-pane compare-terminal-pane" : ""}>
+      <PageComparison
+        noteName={note.name}
+        notePath={note.path}
+        vaultPath={vaultPath}
+        pages={comparisonPages}
+        assetRevision={noteRevision}
+        selectedFigure={selectedFigure?.path}
+        onTextSelect={setSelectedText}
+        onFigureSelect={agentId === "author-editor" ? (figure) => setSelectedFigure((current) => current?.path === figure.path ? null : figure) : undefined}
+        onClose={() => setCompareOpen(false)}
+      />
+    </div>
+  ) : null;
+
+  const sidePane = comparisonViewer ?? noteViewer;
 
   return (
     <main className={`app-shell ${leftPanelOpen ? "" : "left-panel-hidden"} ${rightPanelOpen ? "" : "right-panel-hidden"}`} style={layoutStyle}>
@@ -1021,7 +1068,7 @@ export default function App() {
           }}
         >
           {terminalRequest ? (
-            <div className={`terminal-workspace ${noteViewer ? "with-note" : ""}`}>
+            <div className={`terminal-workspace ${sidePane ? "with-note" : ""}`}>
               {error && <div className="error-banner terminal-error"><span>{error}</span><button onClick={() => setError(null)}><X size={13} /></button></div>}
               <div className="terminal-session-pane">
                 <CodexTerminal
@@ -1033,11 +1080,11 @@ export default function App() {
                   onClose={closeTerminalView}
                 />
               </div>
-              {noteViewer}
+              {sidePane}
             </div>
           ) : terminalReplay ? (
-            <div className={`terminal-workspace ${noteViewer ? "with-note" : ""}`}><CodexTranscript transcript={terminalReplay} cli={PROVIDERS[provider].label} />{noteViewer}</div>
-          ) : messages.length === 0 && !noteInChat ? (
+            <div className={`terminal-workspace ${sidePane ? "with-note" : ""}`}><CodexTranscript transcript={terminalReplay} cli={PROVIDERS[provider].label} />{sidePane}</div>
+          ) : messages.length === 0 && !noteInChat && !compareActive ? (
             <div className="empty-state">
               <div className="empty-orb"><Sparkles size={24} /></div>
               <p className="micro-label">{agent.mode}</p>
@@ -1047,7 +1094,7 @@ export default function App() {
             </div>
           ) : (
             <div className="message-list">
-              {noteViewer}
+              {sidePane}
               {messages.map((message) => (
                 <article key={message.id} className={`message ${message.role}`}>
                   <div className="message-avatar">{message.role === "user" ? "O" : <Sparkles size={15} />}</div>
@@ -1070,23 +1117,15 @@ export default function App() {
             {error && <div className="error-banner"><span>{error}</span><button onClick={() => setError(null)}><X size={13} /></button></div>}
             <div className={`composer ${dragging ? "dragging" : ""} ${editing ? "editing" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={drop}>
               {editing && <div className="editing-banner"><Pencil size={13} />Editing stored question<button onClick={() => { setEditing(null); setPrompt(""); }}><X size={13} /></button></div>}
-              {note && (
-                <div className={`edit-target-tray ${agentId === "retriever" ? "retrieval-context-tray" : ""}`}>
-                  <div className="edit-target-heading">
+              {(selectedText || selectedFigure) && (
+                <div className="selection-tray">
+                  <div className="selection-tray-heading">
                     {agentId === "author-editor" ? <Pencil size={13} /> : <FileText size={13} />}
-                    <strong>{agentId === "author-editor" ? "Edit target" : "Ask about note"}</strong>
-                    {agentId === "author-editor" && (selectedText || selectedFigure) && <span>Scoped selection</span>}
-                    {agentId === "retriever" && <span>{selectedText ? "Highlighted passage" : "Read-only context"}</span>}
+                    <strong>{agentId === "author-editor" ? "Scoped selection" : "Highlighted passage"}</strong>
                   </div>
-                  <div className="edit-target-items">
-                    <span className="edit-target-note">
-                      <FileText size={14} />
-                      <span><strong>{note.name}</strong><small>Selected note</small></span>
-                      <button onClick={() => { setNote(null); setNoteInChat(false); setSelectedText(""); setSelectedFigure(null); }} aria-label="Remove selected note"><X size={12} /></button>
-                    </span>
-                    {agentId === "retriever" && selectedText && <span className="edit-target-text question-context-text"><span>“{selectedText.replace(/\s+/g, " ").slice(0, 100)}{selectedText.length > 100 ? "…" : ""}”</span><button onClick={() => setSelectedText("")} aria-label="Remove highlighted question context"><X size={12} /></button></span>}
-                    {agentId === "author-editor" && selectedText && <span className="edit-target-text"><span>“{selectedText.replace(/\s+/g, " ").slice(0, 100)}{selectedText.length > 100 ? "…" : ""}”</span><button onClick={() => setSelectedText("")} aria-label="Remove selected text"><X size={12} /></button></span>}
-                    {agentId === "author-editor" && selectedFigure && <span className="edit-target-figure"><img src={selectedFigure.dataUrl} alt="" /><span><strong>{selectedFigure.alt}</strong><small>Selected figure</small></span><button onClick={() => setSelectedFigure(null)} aria-label="Remove selected figure"><X size={12} /></button></span>}
+                  <div className="selection-tray-items">
+                    {selectedText && <span className="selection-chip"><span>“{selectedText.replace(/\s+/g, " ").slice(0, 100)}{selectedText.length > 100 ? "…" : ""}”</span><button onClick={() => setSelectedText("")} title="Clear selected text" aria-label="Clear selected text"><X size={12} /></button></span>}
+                    {selectedFigure && <span className="selection-chip selection-chip-figure"><img src={selectedFigure.dataUrl} alt="" /><span><strong>{selectedFigure.alt}</strong><small>Selected figure</small></span><button onClick={() => setSelectedFigure(null)} title="Clear selected figure" aria-label="Clear selected figure"><X size={12} /></button></span>}
                   </div>
                 </div>
               )}
@@ -1165,7 +1204,17 @@ export default function App() {
           <button className="section-label selected-context-toggle" onClick={() => setSelectedContextOpen((open) => !open)} aria-expanded={selectedContextOpen} aria-controls="selected-note-content">
             <span>SELECTED NOTE</span><ChevronDown size={14} />
           </button>
-          {selectedContextOpen && <div id="selected-note-content">{note ? <div className="note-preview"><div><FileText size={17} /><span><strong>{note.name}</strong><small>{note.path}</small></span></div><button className="view-note-button" onClick={toggleNoteView}><Eye size={14} />{noteInChat ? "Close rendered note" : terminalRequest || terminalReplay ? "View rendered note beside terminal" : "View rendered note"}</button></div> : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}</div>}
+          {selectedContextOpen && <div id="selected-note-content">{note ? (
+            <div className="note-preview">
+              <div>
+                <FileText size={17} />
+                <span><strong>{note.name}</strong><small>{note.path}</small></span>
+                <button className="note-preview-remove" onClick={() => { setNote(null); setNoteInChat(false); setCompareOpen(false); setSelectedText(""); setSelectedFigure(null); }} title="Remove selected note" aria-label="Remove selected note"><X size={13} /></button>
+              </div>
+              <button className="view-note-button" onClick={toggleNoteView}><Eye size={14} />{noteInChat ? "Close rendered note" : terminalRequest || terminalReplay ? "View rendered note beside terminal" : "View rendered note"}</button>
+              {comparisonPages && <button className="view-note-button compare-note-button" onClick={toggleCompareView}><Columns2 size={14} />{compareActive ? "Close page comparison" : "Compare source vs rendered"}</button>}
+            </div>
+          ) : <p className="no-context">No note selected. Choose a Markdown file from the vault browser.</p>}</div>}
         </div>
       </aside>
     </main>
