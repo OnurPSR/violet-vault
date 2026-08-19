@@ -121,4 +121,6 @@ Application state is stored in `violet-vault-state.json` inside Electron's platf
 
 Violet Vault does not send data to a cloud service of its own. The Codex or Claude CLI you select remains subject to its provider's authentication and data-handling terms.
 
+## License
 
+Violet Vault is released under the [MIT License](LICENSE).
